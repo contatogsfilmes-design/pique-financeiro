@@ -21,12 +21,26 @@ service cloud.firestore {
     match /empresas/pique/membros/{uid} {
       allow get: if isSignedIn() && (request.auth.uid == uid || isMember());
       allow list: if isMember();
-      allow create: if isSignedIn() && request.auth.uid == uid
-        && request.resource.data.role in ['admin', 'view']
-        && exists(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken))
-        && get(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken)).data.role == request.resource.data.role;
+      allow create: if isSignedIn() && request.auth.uid == uid && (
+        // bootstrap: a primeira pessoa a logar vira admin sozinha, sem convite
+        (request.resource.data.role == 'admin'
+          && !exists(/databases/$(database)/documents/empresas/pique/sistema/bootstrap))
+        ||
+        // depois disso, só entra quem tiver convite válido com o mesmo papel
+        (request.resource.data.role in ['admin', 'view']
+          && exists(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken))
+          && get(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken)).data.role == request.resource.data.role)
+      );
       allow update: if isSignedIn() && request.auth.uid == uid
         && request.resource.data.role == resource.data.role; // o próprio usuário só atualiza campos como fotoURL, não o papel
+      allow update, delete: if isAdmin();
+    }
+
+    // Marcador de bootstrap: existe = já tem um admin, o caminho automático
+    // de "primeiro login vira admin" fica bloqueado a partir daí.
+    match /empresas/pique/sistema/bootstrap {
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && !exists(/databases/$(database)/documents/empresas/pique/sistema/bootstrap);
       allow update, delete: if isAdmin();
     }
 

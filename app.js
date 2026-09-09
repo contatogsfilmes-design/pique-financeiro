@@ -775,13 +775,28 @@ async function resolveMembership(user) {
   const memberRef = db.collection("empresas/pique/membros").doc(user.uid);
   const memberSnap = await memberRef.get();
   if (memberSnap.exists) return memberSnap.data();
+
   const token = new URLSearchParams(location.search).get("convite");
-  if (!token) return null;
-  const inviteRef = db.collection("empresas/pique/convites").doc(token);
-  const inviteSnap = await inviteRef.get();
-  if (!inviteSnap.exists) return null;
-  const role = inviteSnap.data().role;
-  const data = { email: user.email, nome: user.displayName || user.email, role, conviteToken: token, fotoURL: user.photoURL || null, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
+  if (token) {
+    const inviteSnap = await db.collection("empresas/pique/convites").doc(token).get();
+    if (inviteSnap.exists) {
+      const role = inviteSnap.data().role;
+      const data = { email: user.email, nome: user.displayName || user.email, role, conviteToken: token, fotoURL: user.photoURL || null, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
+      await memberRef.set(data);
+      return data;
+    }
+  }
+
+  // Ninguém é admin ainda? A primeira pessoa a logar vira admin sozinha.
+  // O marcador só pode ser criado uma vez (regra do Firestore garante isso).
+  try {
+    await db.collection("empresas/pique/sistema").doc("bootstrap").set({
+      adminCriado: true, uid: user.uid, email: user.email, criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (err) {
+    return null; // já existe um admin — essa conta precisa de convite
+  }
+  const data = { email: user.email, nome: user.displayName || user.email, role: "admin", fotoURL: user.photoURL || null, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
   await memberRef.set(data);
   return data;
 }
