@@ -788,16 +788,18 @@ async function resolveMembership(user) {
   }
 
   // Ninguém é admin ainda? A primeira pessoa a logar vira admin sozinha.
-  // O marcador só pode ser criado uma vez (regra do Firestore garante isso).
-  try {
-    await db.collection("empresas/pique/sistema").doc("bootstrap").set({
-      adminCriado: true, uid: user.uid, email: user.email, criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-  } catch (err) {
-    return null; // já existe um admin — essa conta precisa de convite
-  }
+  // Precisa criar o membro admin ANTES do marcador (senão a própria regra
+  // do marcador bloquearia a criação do membro logo em seguida).
+  const bootstrapRef = db.collection("empresas/pique/sistema").doc("bootstrap");
+  const bootstrapSnap = await bootstrapRef.get();
+  if (bootstrapSnap.exists) return null; // já existe um admin — essa conta precisa de convite
   const data = { email: user.email, nome: user.displayName || user.email, role: "admin", fotoURL: user.photoURL || null, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
   await memberRef.set(data);
+  try {
+    await bootstrapRef.set({ adminCriado: true, uid: user.uid, email: user.email, criadoEm: firebase.firestore.FieldValue.serverTimestamp() });
+  } catch (err) {
+    console.warn("Marcador de bootstrap não pôde ser criado (corrida rara, sem problema):", err);
+  }
   return data;
 }
 auth.onAuthStateChanged(async user => {
