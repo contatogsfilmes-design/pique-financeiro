@@ -1,0 +1,24 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Foto de perfil: qualquer pessoa logada pode ver (aparece pra todo o
+    // time), mas só o dono da conta pode trocar a própria foto.
+    match /avatars/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Notas fiscais: qualquer pessoa logada do time pode ver e anexar.
+    // (A regra do Firestore em empresas/pique/estado já garante que só
+    // membros conseguem chegar até aqui pela UI; aqui liberamos qualquer
+    // usuário autenticado porque Storage não enxerga a coleção de membros.)
+    match /notas/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+        && request.resource.size < 15 * 1024 * 1024;
+    }
+  }
+}
