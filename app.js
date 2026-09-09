@@ -1,10 +1,16 @@
 /* Pique Financeiro — lógica do app.
    Fonte de verdade dos dados: Firestore, doc empresas/pique/estado/dados.
-   Acesso: empresas/pique/membros/{uid} (criado via convite em empresas/pique/convites/{token}).
+   Acesso: lista fixa de e-mails (ver ALLOWED_EMAILS abaixo E firestore.rules —
+   as duas listas precisam ser iguais). Pra liberar mais alguém, adiciona o
+   e-mail nas duas.
 */
 
 const auth = firebase.auth();
 const db = firebase.firestore();
+
+const ALLOWED_EMAILS = [
+  "contatogsfilmes@gmail.com",
+];
 
 const PAYMENT_METHODS = ["Pix", "Cartão de crédito", "Cartão de débito", "Transferência (TED/DOC)", "Boleto", "Dinheiro"];
 const TAG_PALETTE = ["#B5652C", "#5B7FBF", "#C2519A", "#4F8A3D", "#C9A227", "#6E4A9E"];
@@ -629,7 +635,9 @@ function renderAll() {
 }
 
 // ---------------- Equipe & Acesso ----------------
-let lastMembers = [];
+// Sem membros/convites no Firestore: acesso é liberado por uma lista fixa
+// de e-mails direto na regra de segurança (ALLOWED_EMAILS abaixo espelha
+// essa lista só pra mensagens amigáveis na tela).
 function renderProfile() {
   const fotoURL = (currentMember && currentMember.fotoURL) || currentUser.photoURL;
   const initials = (currentUser.displayName || currentUser.email || "?")[0].toUpperCase();
@@ -640,7 +648,7 @@ function renderProfile() {
   document.getElementById("sidebarAvatar").innerHTML = fotoURL ? `<img src="${fotoURL}" alt="">` : initials;
 }
 // Sem Storage pago: a foto é redimensionada no navegador e guardada como
-// imagem pequena (data URL) direto no documento do membro no Firestore.
+// imagem pequena (data URL) direto no documento de perfil no Firestore.
 function resizeImageToDataURL(file, maxDim) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -670,7 +678,7 @@ document.getElementById("avatarInput").addEventListener("change", async e => {
   try {
     const dataUrl = await resizeImageToDataURL(file, 200);
     if (dataUrl.length > 900000) { statusEl.textContent = "Essa foto ficou grande demais mesmo reduzida — tenta outra."; return; }
-    await db.collection("empresas/pique/membros").doc(currentUser.uid).update({ fotoURL: dataUrl });
+    await db.collection("empresas/pique/perfis").doc(currentUser.email).set({ nome: currentUser.displayName || currentUser.email, fotoURL: dataUrl }, { merge: true });
     currentMember.fotoURL = dataUrl;
     renderProfile();
     statusEl.textContent = "Foto atualizada.";
@@ -678,67 +686,14 @@ document.getElementById("avatarInput").addEventListener("change", async e => {
     statusEl.textContent = "Erro ao processar: " + err.message;
   }
 });
-function renderMembers(members) {
-  if (members) lastMembers = members;
-  const wrap = document.getElementById("memberList");
-  if (!lastMembers.length) { wrap.innerHTML = '<p class="empty-hint">Nenhum membro ainda.</p>'; return; }
-  wrap.innerHTML = lastMembers.map(m => {
-    const initials = (m.nome || m.email || "?")[0].toUpperCase();
-    const avatarHtml = m.fotoURL ? `<img src="${m.fotoURL}" alt="">` : initials;
-    return `<div class="member-row"><div class="member-avatar">${avatarHtml}</div><div class="member-info"><div class="member-name">${escapeHtml(m.nome || m.email)}</div><div class="member-email">${escapeHtml(m.email)}</div></div><span class="role-badge ${m.role === "admin" ? "admin" : ""}">${m.role === "admin" ? "Administrador" : "Visualização"}</span></div>`;
+function renderAccessList() {
+  document.getElementById("accessList").innerHTML = ALLOWED_EMAILS.map(email => {
+    const isYou = currentUser && email === currentUser.email;
+    return `<div class="member-row"><div class="member-avatar">${email[0].toUpperCase()}</div><div class="member-info"><div class="member-name">${escapeHtml(email)}${isYou ? " (você)" : ""}</div></div></div>`;
   }).join("");
 }
-function subscribeMembers() {
-  db.collection("empresas/pique/membros").onSnapshot(snap => {
-    const members = [];
-    snap.forEach(doc => members.push({ uid: doc.id, ...doc.data() }));
-    renderMembers(members);
-  }, err => console.error("Erro ao ler membros:", err));
-}
-function loadPendingInvites() {
-  if (!currentMember || currentMember.role !== "admin") return;
-  db.collection("empresas/pique/convites").get().then(snap => {
-    const wrap = document.getElementById("pendingInvites");
-    if (snap.empty) { wrap.innerHTML = '<p class="empty-hint">Nenhum convite pendente.</p>'; return; }
-    wrap.innerHTML = "";
-    snap.forEach(docSnap => {
-      const d = docSnap.data();
-      const row = document.createElement("div");
-      row.className = "pending-invite";
-      row.innerHTML = `<span style="flex:1;">${escapeHtml(d.emailAlvo || "")}</span><span class="role-badge ${d.role === "admin" ? "admin" : ""}">${d.role === "admin" ? "Administrador" : "Visualização"}</span><button class="btn btn-ghost btn-sm" type="button">Revogar</button>`;
-      row.querySelector("button").addEventListener("click", async () => {
-        if (!confirm("Revogar este convite?")) return;
-        await db.collection("empresas/pique/convites").doc(docSnap.id).delete();
-        loadPendingInvites();
-      });
-      wrap.appendChild(row);
-    });
-  }).catch(err => console.error("Erro ao ler convites:", err));
-}
-document.getElementById("inviteForm").addEventListener("submit", async e => {
-  e.preventDefault();
-  if (!requireAdmin()) return;
-  const f = e.target;
-  const email = f.email.value.trim().toLowerCase();
-  const papel = f.papel.value;
-  const token = uid();
-  try {
-    await db.collection("empresas/pique/convites").doc(token).set({
-      emailAlvo: email, role: papel, criadoPor: currentUser.email, criadoEm: firebase.firestore.FieldValue.serverTimestamp(),
-    });
-    const link = `${location.origin}${location.pathname}?convite=${token}`;
-    const resultEl = document.getElementById("inviteResult");
-    resultEl.innerHTML = `<div class="invite-box"><span style="flex:1;">${link}</span><button class="btn btn-sm" id="copyInviteBtn" type="button">Copiar</button></div>`;
-    document.getElementById("copyInviteBtn").addEventListener("click", () => { navigator.clipboard && navigator.clipboard.writeText(link).catch(() => {}); });
-    f.reset();
-    loadPendingInvites();
-  } catch (err) {
-    alert("Erro ao criar convite: " + err.message);
-  }
-});
 function applyRoleGating() {
-  document.body.classList.toggle("read-only", !currentMember || currentMember.role !== "admin");
-  document.getElementById("inviteCard").hidden = !currentMember || currentMember.role !== "admin";
+  document.body.classList.toggle("read-only", false);
 }
 
 // ---------------- Auth ----------------
@@ -771,58 +726,26 @@ document.getElementById("btnGoogleLogin").addEventListener("click", () => {
 });
 document.getElementById("btnSignOut").addEventListener("click", () => auth.signOut());
 
-async function resolveMembership(user) {
-  const memberRef = db.collection("empresas/pique/membros").doc(user.uid);
-  const memberSnap = await memberRef.get();
-  if (memberSnap.exists) return memberSnap.data();
-
-  const token = new URLSearchParams(location.search).get("convite");
-  if (token) {
-    const inviteSnap = await db.collection("empresas/pique/convites").doc(token).get();
-    if (inviteSnap.exists) {
-      const role = inviteSnap.data().role;
-      const data = { email: user.email, nome: user.displayName || user.email, role, conviteToken: token, fotoURL: user.photoURL || null, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
-      await memberRef.set(data);
-      return data;
-    }
-  }
-
-  // Ninguém é admin ainda? A primeira pessoa a logar vira admin sozinha.
-  // Precisa criar o membro admin ANTES do marcador (senão a própria regra
-  // do marcador bloquearia a criação do membro logo em seguida).
-  const bootstrapRef = db.collection("empresas/pique/sistema").doc("bootstrap");
-  const bootstrapSnap = await bootstrapRef.get();
-  if (bootstrapSnap.exists) return null; // já existe um admin — essa conta precisa de convite
-  const data = { email: user.email, nome: user.displayName || user.email, role: "admin", fotoURL: user.photoURL || null, criadoEm: firebase.firestore.FieldValue.serverTimestamp() };
-  await memberRef.set(data);
-  try {
-    await bootstrapRef.set({ adminCriado: true, uid: user.uid, email: user.email, criadoEm: firebase.firestore.FieldValue.serverTimestamp() });
-  } catch (err) {
-    console.warn("Marcador de bootstrap não pôde ser criado (corrida rara, sem problema):", err);
-  }
-  return data;
-}
 auth.onAuthStateChanged(async user => {
   if (!user) { currentUser = null; currentMember = null; showLogin(); return; }
-  setLoginStatus("Verificando acesso…");
+  if (!ALLOWED_EMAILS.includes(user.email)) {
+    setLoginStatus("Essa conta (" + user.email + ") ainda não tem acesso liberado. Peça pra alguém adicionar seu e-mail.", true);
+    await auth.signOut();
+    return;
+  }
+  setLoginStatus("Entrando…");
   try {
-    const member = await resolveMembership(user);
-    if (!member) {
-      setLoginStatus("Essa conta ainda não tem acesso liberado. Peça um convite pra quem administra o Pique Financeiro.", true);
-      await auth.signOut();
-      return;
-    }
     currentUser = user;
-    currentMember = member;
+    const profRef = db.collection("empresas/pique/perfis").doc(user.email);
+    const profSnap = await profRef.get();
+    if (!profSnap.exists) await profRef.set({ nome: user.displayName || user.email, fotoURL: user.photoURL || null });
+    const profData = profSnap.exists ? profSnap.data() : { nome: user.displayName || user.email, fotoURL: user.photoURL || null };
+    currentMember = { email: user.email, role: "admin", nome: profData.nome, fotoURL: profData.fotoURL };
     showApp();
     subscribeState();
-    subscribeMembers();
-    loadPendingInvites();
+    renderAccessList();
   } catch (err) {
     console.error(err);
-    setLoginStatus("Erro ao verificar acesso: " + err.message, true);
+    setLoginStatus("Erro ao entrar: " + err.message, true);
   }
 });
-
-const inviteToken = new URLSearchParams(location.search).get("convite");
-if (inviteToken) document.getElementById("loginIntro").textContent = "Você recebeu um convite pro Pique Financeiro. Entre com a conta Google que vai usar.";

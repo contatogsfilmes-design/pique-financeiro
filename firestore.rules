@@ -2,61 +2,24 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isSignedIn() {
-      return request.auth != null;
-    }
-    function isMember() {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/empresas/pique/membros/$(request.auth.uid));
-    }
-    function isAdmin() {
-      return isMember() &&
-        get(/databases/$(database)/documents/empresas/pique/membros/$(request.auth.uid)).data.role == 'admin';
-    }
-
-    // Membros: qualquer usuário logado pode consultar o PRÓPRIO documento
-    // (mesmo antes de virar membro — é assim que ele descobre se já tem
-    // acesso). Ver a lista inteira dos membros já exige ser membro.
-    // Editar/remover outros membros é só admin.
-    match /empresas/pique/membros/{uid} {
-      allow get: if isSignedIn() && (request.auth.uid == uid || isMember());
-      allow list: if isMember();
-      allow create: if isSignedIn() && request.auth.uid == uid && (
-        // bootstrap: a primeira pessoa a logar vira admin sozinha, sem convite
-        (request.resource.data.role == 'admin'
-          && !exists(/databases/$(database)/documents/empresas/pique/sistema/bootstrap))
-        ||
-        // depois disso, só entra quem tiver convite válido com o mesmo papel
-        (request.resource.data.role in ['admin', 'view']
-          && exists(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken))
-          && get(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken)).data.role == request.resource.data.role)
-      );
-      allow update: if isSignedIn() && request.auth.uid == uid
-        && request.resource.data.role == resource.data.role; // o próprio usuário só atualiza campos como fotoURL, não o papel
-      allow update, delete: if isAdmin();
-    }
-
-    // Marcador de bootstrap: existe = já tem um admin, o caminho automático
-    // de "primeiro login vira admin" fica bloqueado a partir daí.
-    match /empresas/pique/sistema/bootstrap {
-      allow get: if isSignedIn();
-      allow create: if isSignedIn() && !exists(/databases/$(database)/documents/empresas/pique/sistema/bootstrap);
-      allow update, delete: if isAdmin();
-    }
-
-    // Convites: qualquer usuário logado pode LER um convite específico se
-    // souber o token (é o link secreto). Listar todos e criar/revogar é só admin.
-    match /empresas/pique/convites/{token} {
-      allow get: if isSignedIn();
-      allow list: if isAdmin();
-      allow create, update, delete: if isAdmin();
+    // Lista fixa de quem pode entrar. Pra liberar mais alguém, adiciona
+    // o e-mail da conta Google da pessoa numa linha nova aqui.
+    function isAllowed() {
+      return request.auth != null && request.auth.token.email in [
+        'contatogsfilmes@gmail.com'
+      ];
     }
 
     // Estado compartilhado da empresa (contas, clientes, funcionários, tags, notas).
-    // Qualquer membro lê; só admin grava (papel "Visualização" é só-leitura).
     match /empresas/pique/estado/{docId} {
-      allow read: if isMember();
-      allow write: if isAdmin();
+      allow read, write: if isAllowed();
+    }
+
+    // Perfil de cada pessoa (nome, foto) — qualquer um do time vê todo mundo,
+    // mas só edita o próprio.
+    match /empresas/pique/perfis/{email} {
+      allow read: if isAllowed();
+      allow write: if isAllowed() && request.auth.token.email == email;
     }
   }
 }

@@ -544,27 +544,10 @@
         </div>
       </div>
 
-      <div class="panel-row">
-        <div class="card">
-          <div class="card-head"><div><h2>Membros</h2><p>Quem já tem acesso ao financeiro</p></div></div>
-          <div id="memberList"><p class="empty-hint">Carregando membros…</p></div>
-        </div>
-        <div class="card" id="inviteCard">
-          <div class="card-head"><div><h2>Convidar membro</h2><p>Gera um link de acesso convidado</p></div></div>
-          <form class="invite-form" id="inviteForm">
-            <div class="field"><label>E-mail do convidado (conta Google)</label><input type="email" name="email" placeholder="ex: henrique@gmail.com" required></div>
-            <div class="field"><label>Papel</label>
-              <select name="papel"><option value="admin">Administrador · acesso total</option><option value="view">Visualização · só consulta</option></select>
-            </div>
-            <button type="submit" class="btn btn-accent">Gerar link de convite</button>
-          </form>
-          <div id="inviteResult"></div>
-        </div>
-      </div>
-
       <div class="card">
-        <div class="card-head"><div><h2>Convites pendentes</h2><p>Ainda não aceitos — revogue aqui se precisar</p></div></div>
-        <div id="pendingInvites"><p class="empty-hint">Nenhum convite pendente.</p></div>
+        <div class="card-head"><div><h2>Quem tem acesso</h2><p>Só essas contas Google conseguem entrar no Pique Financeiro</p></div></div>
+        <div id="accessList"></div>
+        <p class="stat-sub" style="margin-top:10px;">Pra liberar mais alguém, me chama com o e-mail da conta Google da pessoa — eu adiciono no código.</p>
       </div>
     </section>
   </main>
