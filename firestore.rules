@@ -14,11 +14,13 @@ service cloud.firestore {
         get(/databases/$(database)/documents/empresas/pique/membros/$(request.auth.uid)).data.role == 'admin';
     }
 
-    // Membros: qualquer membro pode ver a lista. Criar o próprio doc só é
-    // permitido se existir um convite válido pro token informado, com o
-    // mesmo papel. Editar/remover outros membros é só admin.
+    // Membros: qualquer usuário logado pode consultar o PRÓPRIO documento
+    // (mesmo antes de virar membro — é assim que ele descobre se já tem
+    // acesso). Ver a lista inteira dos membros já exige ser membro.
+    // Editar/remover outros membros é só admin.
     match /empresas/pique/membros/{uid} {
-      allow get, list: if isMember();
+      allow get: if isSignedIn() && (request.auth.uid == uid || isMember());
+      allow list: if isMember();
       allow create: if isSignedIn() && request.auth.uid == uid
         && request.resource.data.role in ['admin', 'view']
         && exists(/databases/$(database)/documents/empresas/pique/convites/$(request.resource.data.conviteToken))
