@@ -6,7 +6,8 @@ service cloud.firestore {
     // o e-mail da conta Google da pessoa numa linha nova aqui.
     function isAllowed() {
       return request.auth != null && request.auth.token.email in [
-        'contatogsfilmes@gmail.com'
+        'contatogsfilmes@gmail.com',
+        'henriqueronanc@gmail.com'
       ];
     }
 

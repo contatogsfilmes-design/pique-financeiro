@@ -10,6 +10,7 @@ const db = firebase.firestore();
 
 const ALLOWED_EMAILS = [
   "contatogsfilmes@gmail.com",
+  "henriqueronanc@gmail.com",
 ];
 
 const PAYMENT_METHODS = ["Pix", "Cartão de crédito", "Cartão de débito", "Transferência (TED/DOC)", "Boleto", "Dinheiro"];
