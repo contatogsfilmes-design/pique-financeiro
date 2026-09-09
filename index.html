@@ -514,12 +514,13 @@
     <!-- ================= NOTAS FISCAIS ================= -->
     <section id="tab-notas" class="tab-panel">
       <div class="section-head"><h2>Notas Fiscais</h2></div>
+      <p class="stat-sub" style="margin-top:-8px;">Suba o PDF/foto num lugar como Google Drive e cole o link aqui — assim o arquivo em si não passa pelo Pique Financeiro.</p>
       <form class="upload-form admin-only" id="uploadForm">
         <div class="field"><label>Prestador / fornecedor</label><input type="text" name="prestador" placeholder="Ex: Gabriel Almeida" required></div>
         <div class="field"><label>Descrição</label><input type="text" name="desc" placeholder="Ex: Edição de vídeo · agosto" required></div>
         <div class="field"><label>Valor</label><input type="text" name="valor" placeholder="R$ 0,00"></div>
-        <div class="field"><label>Arquivo</label><input type="file" name="arquivo" accept=".pdf,.jpg,.jpeg,.png" required></div>
-        <button type="submit" class="btn btn-accent">Anexar</button>
+        <div class="field"><label>Link do arquivo</label><input type="url" name="link" placeholder="Cole o link do Drive/WhatsApp" required></div>
+        <button type="submit" class="btn btn-accent">Registrar</button>
       </form>
       <div id="invoiceGroups"></div>
     </section>
@@ -580,7 +581,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="app.js"></script>
 </body>

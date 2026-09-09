@@ -5,7 +5,6 @@
 
 const auth = firebase.auth();
 const db = firebase.firestore();
-const storage = firebase.storage();
 
 const PAYMENT_METHODS = ["Pix", "Cartão de crédito", "Cartão de débito", "Transferência (TED/DOC)", "Boleto", "Dinheiro"];
 const TAG_PALETTE = ["#B5652C", "#5B7FBF", "#C2519A", "#4F8A3D", "#C9A227", "#6E4A9E"];
@@ -506,48 +505,38 @@ document.getElementById("clientsBody").addEventListener("change", e => {
 });
 
 // ---------------- Notas Fiscais ----------------
+// Sem Storage pago: o arquivo em si fica guardado onde você já usa (Drive, etc.)
+// e aqui a gente só arquiva o link junto com prestador/descrição/valor/data.
 function renderInvoices() {
   const wrap = document.getElementById("invoiceGroups");
   const notas = state.notas || [];
-  if (!notas.length) { wrap.innerHTML = '<p class="empty-hint">Nenhuma nota fiscal anexada ainda.</p>'; return; }
+  if (!notas.length) { wrap.innerHTML = '<p class="empty-hint">Nenhuma nota fiscal registrada ainda.</p>'; return; }
   const groups = {};
   notas.forEach(n => { (groups[n.prestador] = groups[n.prestador] || []).push(n); });
   wrap.innerHTML = Object.keys(groups).sort().map(prestador => {
     const rows = groups[prestador].map(n => `
-      <a class="invoice-row" href="${n.url}" target="_blank" rel="noopener" style="text-decoration:none; color:inherit;">
+      <a class="invoice-row" href="${escapeHtml(n.url)}" target="_blank" rel="noopener" style="text-decoration:none; color:inherit;">
         <div class="invoice-icon"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 2.5h7l3.5 3.5V17a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z"/></svg></div>
-        <div><div class="invoice-name">${escapeHtml(n.arquivo)}</div><div class="invoice-desc">${escapeHtml(n.desc)}</div></div>
+        <div><div class="invoice-name">${escapeHtml(n.desc)}</div><div class="invoice-desc">Abrir arquivo ↗</div></div>
         <div class="invoice-meta">${n.valor ? `<span class="num">${brl(n.valor)}</span>` : ""}<span class="invoice-date">${fmtDateFull(n.data)}</span></div>
       </a>`).join("");
     return `<div class="invoice-group"><h3>${escapeHtml(prestador)}</h3>${rows}</div>`;
   }).join("");
 }
-document.getElementById("uploadForm").addEventListener("submit", async e => {
+document.getElementById("uploadForm").addEventListener("submit", e => {
   e.preventDefault();
   if (!requireAdmin()) return;
   const f = e.target;
   const prestador = f.prestador.value.trim();
   const desc = f.desc.value.trim();
   const valor = parseBRL(f.valor.value || "0");
-  const file = f.arquivo.files[0];
-  if (!prestador || !desc || !file) return;
-  const submitBtn = f.querySelector('button[type="submit"]');
-  submitBtn.disabled = true; submitBtn.textContent = "Enviando…";
-  try {
-    const path = `notas/${Date.now()}_${file.name}`;
-    const ref = storage.ref().child(path);
-    await ref.put(file);
-    const url = await ref.getDownloadURL();
-    state.notas = state.notas || [];
-    state.notas.unshift({ id: "nf-" + uid(), prestador, desc, valor, arquivo: file.name, url, path, data: TODAY_ISO, enviadoPor: currentUser.email });
-    renderInvoices();
-    scheduleSave();
-    f.reset();
-  } catch (err) {
-    alert("Erro ao enviar o arquivo: " + err.message);
-  } finally {
-    submitBtn.disabled = false; submitBtn.textContent = "Anexar";
-  }
+  const link = f.link.value.trim();
+  if (!prestador || !desc || !link) return;
+  state.notas = state.notas || [];
+  state.notas.unshift({ id: "nf-" + uid(), prestador, desc, valor, url: link, data: TODAY_ISO, enviadoPor: currentUser.email });
+  renderInvoices();
+  scheduleSave();
+  f.reset();
 });
 
 // ---------------- Dashboard ----------------
@@ -650,21 +639,43 @@ function renderProfile() {
   document.getElementById("sidebarUserName").textContent = currentUser.displayName || currentUser.email;
   document.getElementById("sidebarAvatar").innerHTML = fotoURL ? `<img src="${fotoURL}" alt="">` : initials;
 }
+// Sem Storage pago: a foto é redimensionada no navegador e guardada como
+// imagem pequena (data URL) direto no documento do membro no Firestore.
+function resizeImageToDataURL(file, maxDim) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = () => reject(new Error("Não consegui ler essa imagem."));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("Não consegui ler o arquivo."));
+    reader.readAsDataURL(file);
+  });
+}
 document.getElementById("avatarInput").addEventListener("change", async e => {
   const file = e.target.files[0];
   if (!file) return;
   const statusEl = document.getElementById("avatarStatus");
-  statusEl.textContent = "Enviando foto…";
+  statusEl.textContent = "Processando foto…";
   try {
-    const ref = storage.ref().child(`avatars/${currentUser.uid}`);
-    await ref.put(file);
-    const url = await ref.getDownloadURL();
-    await db.collection("empresas/pique/membros").doc(currentUser.uid).update({ fotoURL: url });
-    currentMember.fotoURL = url;
+    const dataUrl = await resizeImageToDataURL(file, 200);
+    if (dataUrl.length > 900000) { statusEl.textContent = "Essa foto ficou grande demais mesmo reduzida — tenta outra."; return; }
+    await db.collection("empresas/pique/membros").doc(currentUser.uid).update({ fotoURL: dataUrl });
+    currentMember.fotoURL = dataUrl;
     renderProfile();
     statusEl.textContent = "Foto atualizada.";
   } catch (err) {
-    statusEl.textContent = "Erro ao enviar: " + err.message;
+    statusEl.textContent = "Erro ao processar: " + err.message;
   }
 });
 function renderMembers(members) {
