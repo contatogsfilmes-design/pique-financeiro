@@ -514,11 +514,19 @@ function openEmployeeForm(emp) {
   const isEdit = !!emp;
   const readOnly = !currentMember || currentMember.role !== "admin";
   document.getElementById("formModalTitle").textContent = isEdit ? "Editar funcionário/prestador" : "Novo funcionário/prestador";
+  const bill = isEdit ? state.bills.find(b => b.id === emp.billId) : null;
+  const tipoAtual = bill ? bill.kind : "Funcionário";
+  const dueAtual = bill ? bill.due : endOfMonthISO();
   document.getElementById("formModalBody").innerHTML = `
     <div class="form-grid">
       <div class="modal-field full"><label>Nome</label><input type="text" id="efNome" value="${isEdit ? escapeHtml(emp.nome) : ""}" ${readOnly ? "disabled" : ""}></div>
-      <div class="modal-field full"><label>Função</label><input type="text" id="efFuncao" value="${isEdit ? escapeHtml(emp.funcao || "") : ""}" ${readOnly ? "disabled" : ""}></div>
-      <div class="modal-field full"><label>Valor base mensal</label><input type="text" id="efBase" value="${isEdit ? brl(emp.base) : ""}" placeholder="R$ 0,00" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Função</label><input type="text" id="efFuncao" value="${isEdit ? escapeHtml(emp.funcao || "") : ""}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Tipo</label><select id="efTipo" ${readOnly ? "disabled" : ""}>
+        <option value="Funcionário" ${tipoAtual === "Funcionário" ? "selected" : ""}>Funcionário</option>
+        <option value="Prestador" ${tipoAtual === "Prestador" ? "selected" : ""}>Prestador</option>
+      </select></div>
+      <div class="modal-field"><label>Valor base mensal</label><input type="text" id="efBase" value="${isEdit ? brl(emp.base) : ""}" placeholder="R$ 0,00" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Dia de pagamento</label><input type="date" id="efDue" value="${dueAtual}" ${readOnly ? "disabled" : ""}></div>
     </div>
     ${isEdit ? '<div class="modal-note">Vales, reembolsos e outros gastos do mês são adicionados direto no card, em Funcionários &amp; Prestadores.</div>' : ""}`;
   document.getElementById("formModalFoot").innerHTML = `
@@ -533,16 +541,18 @@ function openEmployeeForm(emp) {
       const nome = document.getElementById("efNome").value.trim();
       if (!nome) return;
       const funcao = document.getElementById("efFuncao").value.trim();
+      const tipo = document.getElementById("efTipo").value;
       const base = parseBRL(document.getElementById("efBase").value);
+      const due = document.getElementById("efDue").value || endOfMonthISO();
       if (isEdit) {
         emp.nome = nome; emp.funcao = funcao; emp.base = base;
         syncEmployeeBill(emp);
-        const bill = state.bills.find(b => b.id === emp.billId);
-        if (bill) bill.title = "Pagamento · " + nome;
+        const b = state.bills.find(x => x.id === emp.billId);
+        if (b) { b.title = "Pagamento · " + nome; b.kind = tipo; b.due = due; }
       } else {
         const billId = "emp-" + uid();
         const empId = "person-" + uid();
-        state.bills.push({ id: billId, title: "Pagamento · " + nome, kind: "Funcionário", tagId: "custo-funcionario", value: base, due: endOfMonthISO(), status: "pendente" });
+        state.bills.push({ id: billId, title: "Pagamento · " + nome, kind: tipo, tagId: "custo-funcionario", value: base, due, status: "pendente" });
         state.employees.push({ id: empId, nome, funcao, base, despesas: [], billId });
       }
       closeFormModal();
