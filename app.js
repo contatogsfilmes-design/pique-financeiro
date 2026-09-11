@@ -55,6 +55,24 @@ function nextDueISO(diaStr) {
   return `${y}-${String(m + 1).padStart(2, "0")}-${String(dia).padStart(2, "0")}`;
 }
 function tagById(id) { return state.tags.find(t => t.id === id); }
+function tagOptionsHTML(selectedId) {
+  return state.tags.map(t => `<option value="${t.id}" ${t.id === selectedId ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("") + '<option value="__new__">+ Nova tag…</option>';
+}
+function wireNewTagOption(selectEl, fallbackId) {
+  selectEl.addEventListener("change", e => {
+    if (e.target.value !== "__new__") return;
+    const label = prompt("Nome da nova tag (ex: Marketing, Impostos):");
+    const id = label && addTag(label);
+    if (!id) { e.target.value = fallbackId || ""; return; }
+    const opt = document.createElement("option");
+    opt.value = id; opt.textContent = label.trim();
+    e.target.querySelector('option[value="__new__"]').insertAdjacentElement("beforebegin", opt);
+    e.target.value = id;
+    fallbackId = id;
+    renderFilterChips();
+    scheduleSave();
+  });
+}
 function addTag(label) {
   const id = slugify(label);
   if (!id) return null;
@@ -241,7 +259,7 @@ function renderToolsTable() {
   const rows = state.bills.filter(b => b.kind === "Ferramenta");
   document.getElementById("toolsBody").innerHTML = rows.length ? rows.map(b => {
     const pm = payPillMeta(b);
-    return `<tr data-bill-id="${b.id}"><td>${escapeHtml(b.title)}</td><td>${escapeHtml(b.categoria || "")}</td><td class="num">${brl(b.value)}</td><td>${b.due.split("-")[2]}</td><td><span class="badge ativo">Ativo</span></td><td><button class="pay-pill ${pm.cls}">${pm.text}</button></td></tr>`;
+    return `<tr class="row-click" data-bill-id="${b.id}"><td>${escapeHtml(b.title)}</td><td>${escapeHtml(b.categoria || "")}</td><td class="num">${brl(b.value)}</td><td>${b.due.split("-")[2]}</td><td><span class="badge ativo">Ativo</span></td><td><button class="pay-pill ${pm.cls}">${pm.text}</button></td></tr>`;
   }).join("") : '<tr><td colspan="6" class="empty-hint">Nenhuma ferramenta cadastrada.</td></tr>';
 }
 function renderInstallmentsTable() {
@@ -249,7 +267,7 @@ function renderInstallmentsTable() {
   document.getElementById("installBody").innerHTML = rows.length ? rows.map(b => {
     const pm = payPillMeta(b);
     const restam = (b.parcelas || 1) - (b.parcelaAtual || 1);
-    return `<tr data-bill-id="${b.id}"><td>${escapeHtml(b.title)}</td><td class="num">${brl(b.valorTotal || b.value)}</td><td>${b.parcelaAtual || 1}/${b.parcelas || 1}</td><td class="num">${brl(b.value)}</td><td>${fmtDateFull(b.due)}</td><td>${restam} parcelas</td><td><button class="pay-pill ${pm.cls}">${pm.text}</button></td></tr>`;
+    return `<tr class="row-click" data-bill-id="${b.id}"><td>${escapeHtml(b.title)}</td><td class="num">${brl(b.valorTotal || b.value)}</td><td>${b.parcelaAtual || 1}/${b.parcelas || 1}</td><td class="num">${brl(b.value)}</td><td>${fmtDateFull(b.due)}</td><td>${restam} parcelas</td><td><button class="pay-pill ${pm.cls}">${pm.text}</button></td></tr>`;
   }).join("") : '<tr><td colspan="7" class="empty-hint">Nenhum parcelamento cadastrado.</td></tr>';
 }
 function empCardEl(emp) {
@@ -258,14 +276,15 @@ function empCardEl(emp) {
   div.dataset.id = emp.id;
   div.dataset.billId = emp.billId;
   const initials = emp.nome.trim().split(/\s+/).slice(0, 2).map(s => s[0].toUpperCase()).join("");
-  const expHtml = (emp.despesas || []).map(d => `<li><span>${escapeHtml(d.tipo)}${d.desc ? " · " + escapeHtml(d.desc) : ""} · ${fmtDate(d.data)}</span><span class="num">${brl(d.valor)}</span></li>`).join("");
+  const expHtml = (emp.despesas || []).map((d, i) => `<li data-idx="${i}" data-action="emp-edit-exp"><span>${escapeHtml(d.tipo)}${d.desc ? " · " + escapeHtml(d.desc) : ""} · ${fmtDate(d.data)}</span><span class="num">${brl(d.valor)}</span><button class="btn-ghost" data-action="emp-del-exp" title="Excluir gasto" type="button">✕</button></li>`).join("");
   const bill = state.bills.find(b => b.id === emp.billId);
   const pm = payPillMeta(bill);
   div.innerHTML = `
     <div class="emp-top">
       <div class="emp-avatar">${initials}</div>
-      <div><div class="emp-name">${escapeHtml(emp.nome)}</div><div class="emp-role">${escapeHtml(emp.funcao || "")}</div></div>
-      <div class="emp-base"><div class="stat-label">Base</div><div class="num">${brl(emp.base)}</div></div>
+      <div class="emp-info" data-action="emp-edit" title="Editar funcionário/prestador"><div class="emp-name">${escapeHtml(emp.nome)}</div><div class="emp-role">${escapeHtml(emp.funcao || "")}</div></div>
+      <div class="emp-base" data-action="emp-edit" title="Editar funcionário/prestador"><div class="stat-label">Base</div><div class="num">${brl(emp.base)}</div></div>
+      <button class="btn-ghost" data-action="emp-del" title="Excluir funcionário/prestador" type="button">✕</button>
     </div>
     <ul class="exp-list">${expHtml}</ul>
     <div class="add-exp-row">
@@ -290,65 +309,257 @@ function syncEmployeeBill(emp) {
   if (bill) bill.value = empTotal(emp);
 }
 document.getElementById("empGrid").addEventListener("click", e => {
-  const btn = e.target.closest('[data-action="emp-add-exp"]');
-  if (!btn) return;
-  if (!requireAdmin()) return;
-  const card = btn.closest(".emp-card");
-  const row = btn.closest(".add-exp-row");
-  const emp = state.employees.find(x => x.id === card.dataset.id);
-  if (!emp) return;
-  const tipo = row.querySelector('[name="tipo"]').value;
-  const desc = row.querySelector('[name="desc"]').value.trim();
-  const valor = parseBRL(row.querySelector('[name="valor"]').value);
-  if (!valor) return;
-  emp.despesas = emp.despesas || [];
-  emp.despesas.push({ tipo, desc, valor, data: TODAY_ISO });
-  syncEmployeeBill(emp);
-  renderAll();
-  scheduleSave();
+  const addBtn = e.target.closest('[data-action="emp-add-exp"]');
+  if (addBtn) {
+    if (!requireAdmin()) return;
+    const card = addBtn.closest(".emp-card");
+    const row = addBtn.closest(".add-exp-row");
+    const emp = state.employees.find(x => x.id === card.dataset.id);
+    if (!emp) return;
+    const tipo = row.querySelector('[name="tipo"]').value;
+    const desc = row.querySelector('[name="desc"]').value.trim();
+    const valor = parseBRL(row.querySelector('[name="valor"]').value);
+    if (!valor) return;
+    emp.despesas = emp.despesas || [];
+    emp.despesas.push({ tipo, desc, valor, data: TODAY_ISO });
+    syncEmployeeBill(emp);
+    renderAll();
+    scheduleSave();
+    return;
+  }
+  const delExpBtn = e.target.closest('[data-action="emp-del-exp"]');
+  if (delExpBtn) {
+    if (!requireAdmin()) return;
+    const card = delExpBtn.closest(".emp-card");
+    const emp = state.employees.find(x => x.id === card.dataset.id);
+    if (!emp) return;
+    const idx = Number(delExpBtn.closest("li").dataset.idx);
+    if (!confirm("Excluir este gasto?")) return;
+    emp.despesas.splice(idx, 1);
+    syncEmployeeBill(emp);
+    renderAll();
+    scheduleSave();
+    return;
+  }
+  const delBtn = e.target.closest('[data-action="emp-del"]');
+  if (delBtn) {
+    if (!requireAdmin()) return;
+    const card = delBtn.closest(".emp-card");
+    const emp = state.employees.find(x => x.id === card.dataset.id);
+    if (!emp) return;
+    if (!confirm(`Excluir ${emp.nome}? Isso também remove a conta de pagamento dele. Essa ação não pode ser desfeita.`)) return;
+    state.employees = state.employees.filter(x => x.id !== emp.id);
+    state.bills = state.bills.filter(b => b.id !== emp.billId);
+    renderAll();
+    scheduleSave();
+    return;
+  }
+  const editExpBtn = e.target.closest('[data-action="emp-edit-exp"]');
+  if (editExpBtn) {
+    if (!requireAdmin()) return;
+    const card = editExpBtn.closest(".emp-card");
+    const emp = state.employees.find(x => x.id === card.dataset.id);
+    if (!emp) return;
+    const idx = Number(editExpBtn.dataset.idx);
+    const d = (emp.despesas || [])[idx];
+    if (!d) return;
+    const tipo = prompt("Tipo (Vale, Uber, Reembolso, Outro):", d.tipo) || d.tipo;
+    const desc = prompt("Descrição:", d.desc || "") || "";
+    const valor = parseBRL(prompt("Valor (R$):", String(d.valor).replace(".", ",")) || "0");
+    if (!valor) return;
+    d.tipo = tipo; d.desc = desc; d.valor = valor;
+    syncEmployeeBill(emp);
+    renderAll();
+    scheduleSave();
+    return;
+  }
+  const editBtn = e.target.closest('[data-action="emp-edit"]');
+  if (editBtn) {
+    if (!requireAdmin()) return;
+    const card = editBtn.closest(".emp-card");
+    const emp = state.employees.find(x => x.id === card.dataset.id);
+    if (!emp) return;
+    openEmployeeForm(emp);
+  }
 });
 document.getElementById("btnAddEmp").addEventListener("click", () => {
   if (!requireAdmin()) return;
-  const nome = prompt("Nome do funcionário ou prestador:");
-  if (!nome) return;
-  const funcao = prompt("Função:", "") || "";
-  const base = parseBRL(prompt("Valor base mensal (R$):", "0") || "0");
-  const billId = "emp-" + uid();
-  const empId = "person-" + uid();
-  state.bills.push({ id: billId, title: "Pagamento · " + nome, kind: "Funcionário", tagId: "custo-funcionario", value: base, due: endOfMonthISO(), status: "pendente" });
-  state.employees.push({ id: empId, nome, funcao, base, despesas: [], billId });
-  renderAll();
-  scheduleSave();
+  openEmployeeForm(null);
 });
 document.getElementById("btnAddTool").addEventListener("click", () => {
   if (!requireAdmin()) return;
-  const nome = prompt("Nome da ferramenta:");
-  if (!nome) return;
-  const categoria = prompt("Categoria:", "") || "";
-  const valor = parseBRL(prompt("Valor mensal (R$):", "0") || "0");
-  const dia = prompt("Dia de cobrança:", "") || "";
-  const tagLabel = prompt("Tag (ex: Assinatura Digital, Operacional):", "Assinatura Digital") || "Assinatura Digital";
-  const tagId = addTag(tagLabel);
-  state.bills.push({ id: "tool-" + uid(), title: nome, kind: "Ferramenta", categoria, tagId, value: valor, due: nextDueISO(dia), status: "pendente" });
-  renderFilterChips();
-  renderAll();
-  scheduleSave();
+  openToolForm(null);
 });
 document.getElementById("btnAddInstallment").addEventListener("click", () => {
   if (!requireAdmin()) return;
-  const desc = prompt("Descrição do investimento:");
-  if (!desc) return;
-  const total = parseBRL(prompt("Valor total (R$):", "0") || "0");
-  const parcelas = Number(prompt("Número de parcelas:", "12") || "12");
-  const diaParcela = prompt("Dia de vencimento da parcela:", "15") || "15";
-  const tagLabel = prompt("Tag (ex: Investimento):", "Investimento") || "Investimento";
-  const tagId = addTag(tagLabel);
-  const valorParcela = total / (parcelas || 1);
-  state.bills.push({ id: "inst-" + uid(), title: desc, kind: "Parcelado", tagId, value: valorParcela, valorTotal: total, parcelas, parcelaAtual: 1, due: nextDueISO(diaParcela), status: "pendente" });
-  renderFilterChips();
-  renderAll();
-  scheduleSave();
+  openInstallmentForm(null);
 });
+
+// ---------------- Custos Mensais: form modal (create/edit ferramenta, parcelamento, funcionário) ----------------
+function closeFormModal() { document.getElementById("formModalOverlay").classList.remove("open"); }
+document.getElementById("formModalClose").addEventListener("click", closeFormModal);
+document.getElementById("formModalOverlay").addEventListener("click", e => { if (e.target.id === "formModalOverlay") closeFormModal(); });
+function openToolForm(bill) {
+  const isEdit = !!bill;
+  const readOnly = !currentMember || currentMember.role !== "admin";
+  document.getElementById("formModalTitle").textContent = isEdit ? "Editar ferramenta" : "Nova ferramenta";
+  document.getElementById("formModalBody").innerHTML = `
+    <div class="form-grid">
+      <div class="modal-field full"><label>Nome da ferramenta</label><input type="text" id="tfNome" value="${isEdit ? escapeHtml(bill.title) : ""}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Categoria</label><input type="text" id="tfCategoria" value="${isEdit ? escapeHtml(bill.categoria || "") : ""}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Tag</label><select id="tfTag" ${readOnly ? "disabled" : ""}>${tagOptionsHTML(isEdit ? bill.tagId : (state.tags[0] && state.tags[0].id))}</select></div>
+      <div class="modal-field"><label>Valor mensal</label><input type="text" id="tfValor" value="${isEdit ? brl(bill.value) : ""}" placeholder="R$ 0,00" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Dia de cobrança</label><input type="number" id="tfDia" min="1" max="28" value="${isEdit ? bill.due.split("-")[2] : TODAY.getDate()}" ${readOnly ? "disabled" : ""}></div>
+    </div>`;
+  document.getElementById("formModalFoot").innerHTML = `
+    ${(isEdit && !readOnly) ? '<button class="btn btn-ghost" id="tfDelete" type="button" style="color:var(--negative);">Excluir ferramenta</button>' : "<span></span>"}
+    <div style="display:flex; gap:8px;">
+      <button class="btn" id="tfCancel" type="button">${readOnly ? "Fechar" : "Cancelar"}</button>
+      ${readOnly ? "" : '<button class="btn btn-accent" id="tfSave" type="button">Salvar</button>'}
+    </div>`;
+  document.getElementById("tfCancel").addEventListener("click", closeFormModal);
+  if (!readOnly) {
+    wireNewTagOption(document.getElementById("tfTag"), isEdit ? bill.tagId : null);
+    document.getElementById("tfSave").addEventListener("click", () => {
+      const nome = document.getElementById("tfNome").value.trim();
+      if (!nome) return;
+      const categoria = document.getElementById("tfCategoria").value.trim();
+      const valor = parseBRL(document.getElementById("tfValor").value);
+      const dia = document.getElementById("tfDia").value || String(TODAY.getDate());
+      const tagId = document.getElementById("tfTag").value;
+      if (isEdit) {
+        bill.title = nome; bill.categoria = categoria; bill.value = valor; bill.tagId = tagId; bill.due = nextDueISO(dia);
+      } else {
+        state.bills.push({ id: "tool-" + uid(), title: nome, kind: "Ferramenta", categoria, tagId, value: valor, due: nextDueISO(dia), status: "pendente" });
+      }
+      closeFormModal();
+      renderFilterChips();
+      renderAll();
+      scheduleSave();
+    });
+    if (isEdit) document.getElementById("tfDelete").addEventListener("click", () => {
+      if (!confirm("Excluir esta ferramenta? Essa ação não pode ser desfeita.")) return;
+      state.bills = state.bills.filter(x => x.id !== bill.id);
+      closeFormModal();
+      renderFilterChips();
+      renderAll();
+      scheduleSave();
+    });
+  }
+  document.getElementById("formModalOverlay").classList.add("open");
+}
+function openInstallmentForm(bill) {
+  const isEdit = !!bill;
+  const readOnly = !currentMember || currentMember.role !== "admin";
+  document.getElementById("formModalTitle").textContent = isEdit ? "Editar parcelamento" : "Novo parcelamento";
+  document.getElementById("formModalBody").innerHTML = `
+    <div class="form-grid">
+      <div class="modal-field full"><label>Descrição</label><input type="text" id="ifDesc" value="${isEdit ? escapeHtml(bill.title) : ""}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Valor total</label><input type="text" id="ifTotal" value="${isEdit ? brl(bill.valorTotal || bill.value) : ""}" placeholder="R$ 0,00" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Nº de parcelas</label><input type="number" id="ifParcelas" min="1" value="${isEdit ? (bill.parcelas || 1) : 12}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Parcela atual</label><input type="number" id="ifAtual" min="1" value="${isEdit ? (bill.parcelaAtual || 1) : 1}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Valor da parcela</label><input type="text" id="ifValor" value="${isEdit ? brl(bill.value) : ""}" placeholder="R$ 0,00" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field"><label>Próxima parcela</label><input type="date" id="ifDue" value="${isEdit ? bill.due : nextDueISO(15)}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field full"><label>Tag</label><select id="ifTag" ${readOnly ? "disabled" : ""}>${tagOptionsHTML(isEdit ? bill.tagId : (tagById("investimento") ? "investimento" : (state.tags[0] && state.tags[0].id)))}</select></div>
+    </div>`;
+  document.getElementById("formModalFoot").innerHTML = `
+    ${(isEdit && !readOnly) ? '<button class="btn btn-ghost" id="ifDelete" type="button" style="color:var(--negative);">Excluir parcelamento</button>' : "<span></span>"}
+    <div style="display:flex; gap:8px;">
+      <button class="btn" id="ifCancel" type="button">${readOnly ? "Fechar" : "Cancelar"}</button>
+      ${readOnly ? "" : '<button class="btn btn-accent" id="ifSave" type="button">Salvar</button>'}
+    </div>`;
+  document.getElementById("ifCancel").addEventListener("click", closeFormModal);
+  if (!readOnly) {
+    wireNewTagOption(document.getElementById("ifTag"), isEdit ? bill.tagId : null);
+    if (!isEdit) {
+      const autoFillValor = () => {
+        const total = parseBRL(document.getElementById("ifTotal").value);
+        const parcelas = Number(document.getElementById("ifParcelas").value) || 1;
+        document.getElementById("ifValor").value = brl(total / parcelas);
+      };
+      document.getElementById("ifTotal").addEventListener("input", autoFillValor);
+      document.getElementById("ifParcelas").addEventListener("input", autoFillValor);
+    }
+    document.getElementById("ifSave").addEventListener("click", () => {
+      const desc = document.getElementById("ifDesc").value.trim();
+      if (!desc) return;
+      const total = parseBRL(document.getElementById("ifTotal").value);
+      const parcelas = Number(document.getElementById("ifParcelas").value) || 1;
+      const atual = Number(document.getElementById("ifAtual").value) || 1;
+      const valor = parseBRL(document.getElementById("ifValor").value);
+      const due = document.getElementById("ifDue").value;
+      const tagId = document.getElementById("ifTag").value;
+      if (isEdit) {
+        bill.title = desc; bill.valorTotal = total; bill.parcelas = parcelas; bill.parcelaAtual = atual; bill.value = valor; bill.due = due; bill.tagId = tagId;
+      } else {
+        state.bills.push({ id: "inst-" + uid(), title: desc, kind: "Parcelado", tagId, value: valor, valorTotal: total, parcelas, parcelaAtual: atual, due, status: "pendente" });
+      }
+      closeFormModal();
+      renderFilterChips();
+      renderAll();
+      scheduleSave();
+    });
+    if (isEdit) document.getElementById("ifDelete").addEventListener("click", () => {
+      if (!confirm("Excluir este parcelamento? Essa ação não pode ser desfeita.")) return;
+      state.bills = state.bills.filter(x => x.id !== bill.id);
+      closeFormModal();
+      renderFilterChips();
+      renderAll();
+      scheduleSave();
+    });
+  }
+  document.getElementById("formModalOverlay").classList.add("open");
+}
+function openEmployeeForm(emp) {
+  const isEdit = !!emp;
+  const readOnly = !currentMember || currentMember.role !== "admin";
+  document.getElementById("formModalTitle").textContent = isEdit ? "Editar funcionário/prestador" : "Novo funcionário/prestador";
+  document.getElementById("formModalBody").innerHTML = `
+    <div class="form-grid">
+      <div class="modal-field full"><label>Nome</label><input type="text" id="efNome" value="${isEdit ? escapeHtml(emp.nome) : ""}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field full"><label>Função</label><input type="text" id="efFuncao" value="${isEdit ? escapeHtml(emp.funcao || "") : ""}" ${readOnly ? "disabled" : ""}></div>
+      <div class="modal-field full"><label>Valor base mensal</label><input type="text" id="efBase" value="${isEdit ? brl(emp.base) : ""}" placeholder="R$ 0,00" ${readOnly ? "disabled" : ""}></div>
+    </div>
+    ${isEdit ? '<div class="modal-note">Vales, reembolsos e outros gastos do mês são adicionados direto no card, em Funcionários &amp; Prestadores.</div>' : ""}`;
+  document.getElementById("formModalFoot").innerHTML = `
+    ${(isEdit && !readOnly) ? '<button class="btn btn-ghost" id="efDelete" type="button" style="color:var(--negative);">Excluir</button>' : "<span></span>"}
+    <div style="display:flex; gap:8px;">
+      <button class="btn" id="efCancel" type="button">${readOnly ? "Fechar" : "Cancelar"}</button>
+      ${readOnly ? "" : '<button class="btn btn-accent" id="efSave" type="button">Salvar</button>'}
+    </div>`;
+  document.getElementById("efCancel").addEventListener("click", closeFormModal);
+  if (!readOnly) {
+    document.getElementById("efSave").addEventListener("click", () => {
+      const nome = document.getElementById("efNome").value.trim();
+      if (!nome) return;
+      const funcao = document.getElementById("efFuncao").value.trim();
+      const base = parseBRL(document.getElementById("efBase").value);
+      if (isEdit) {
+        emp.nome = nome; emp.funcao = funcao; emp.base = base;
+        syncEmployeeBill(emp);
+        const bill = state.bills.find(b => b.id === emp.billId);
+        if (bill) bill.title = "Pagamento · " + nome;
+      } else {
+        const billId = "emp-" + uid();
+        const empId = "person-" + uid();
+        state.bills.push({ id: billId, title: "Pagamento · " + nome, kind: "Funcionário", tagId: "custo-funcionario", value: base, due: endOfMonthISO(), status: "pendente" });
+        state.employees.push({ id: empId, nome, funcao, base, despesas: [], billId });
+      }
+      closeFormModal();
+      renderAll();
+      scheduleSave();
+    });
+    if (isEdit) document.getElementById("efDelete").addEventListener("click", () => {
+      if (!confirm(`Excluir ${emp.nome}? Isso também remove a conta de pagamento dele. Essa ação não pode ser desfeita.`)) return;
+      state.employees = state.employees.filter(x => x.id !== emp.id);
+      state.bills = state.bills.filter(b => b.id !== emp.billId);
+      closeFormModal();
+      renderAll();
+      scheduleSave();
+    });
+  }
+  document.getElementById("formModalOverlay").classList.add("open");
+}
 
 // ---------------- Bill detail / payment / delete modal ----------------
 function openBillModal(id) {
@@ -357,7 +568,7 @@ function openBillModal(id) {
   currentModalId = id;
   const isPayroll = b.kind === "Funcionário" || b.kind === "Prestador";
   document.getElementById("modalTitle").textContent = displayTitle(b);
-  const tagOptions = state.tags.map(t => `<option value="${t.id}" ${t.id === b.tagId ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("");
+  const tagOptions = tagOptionsHTML(b.tagId);
   const methodOptions = PAYMENT_METHODS.map(m => `<option value="${m}" ${b.method === m ? "selected" : ""}>${m}</option>`).join("");
   let body = "";
   const readOnly = !currentMember || currentMember.role !== "admin";
@@ -365,7 +576,7 @@ function openBillModal(id) {
   if (readOnly) body += `<div class="modal-note">Você está no modo Visualização — só pode consultar.</div>`;
   body += `
     <div class="modal-field"><label>Título</label><input type="text" id="mfTitle" value="${escapeHtml(b.title)}" ${isPayroll || readOnly ? "disabled" : ""}></div>
-    <div class="modal-field"><label>Valor</label><input type="text" value="${brl(b.value)}" disabled></div>
+    <div class="modal-field"><label>Valor</label><input type="text" id="mfValue" value="${brl(b.value)}" ${isPayroll || readOnly ? "disabled" : ""}></div>
     <div class="modal-field"><label>Vencimento</label><input type="date" id="mfDue" value="${b.due}" ${readOnly ? "disabled" : ""}></div>
     <div class="modal-field"><label>Tag</label><select id="mfTag" ${readOnly ? "disabled" : ""}>${tagOptions}</select></div>
     <div class="modal-field"><label>Status</label>
@@ -397,6 +608,7 @@ function openBillModal(id) {
         document.getElementById("mfPaidOnWrap").style.display = show ? "" : "none";
       });
     });
+    wireNewTagOption(document.getElementById("mfTag"), b.tagId);
     document.getElementById("mfSave").addEventListener("click", saveBillModal);
     if (!isPayroll) document.getElementById("mfDelete").addEventListener("click", deleteBillModal);
   }
@@ -411,6 +623,7 @@ function saveBillModal() {
   if (!isPayroll) {
     const titleVal = document.getElementById("mfTitle").value.trim();
     if (titleVal) b.title = titleVal;
+    b.value = parseBRL(document.getElementById("mfValue").value);
   }
   const dueVal = document.getElementById("mfDue").value;
   if (dueVal) b.due = dueVal;
@@ -433,15 +646,23 @@ function deleteBillModal() {
   scheduleSave();
 }
 document.addEventListener("click", e => {
-  const trigger = e.target.closest(".bill-card, .cal-pill, .pay-pill");
-  if (!trigger) return;
-  const host = trigger.closest("[data-bill-id]");
-  if (!host || !host.dataset.billId) return;
-  openBillModal(host.dataset.billId);
+  const payTrigger = e.target.closest(".bill-card, .cal-pill, .pay-pill");
+  if (payTrigger) {
+    const host = payTrigger.closest("[data-bill-id]");
+    if (host && host.dataset.billId) openBillModal(host.dataset.billId);
+    return;
+  }
+  const rowTrigger = e.target.closest("tr.row-click[data-bill-id]");
+  if (rowTrigger) {
+    const b = state.bills.find(x => x.id === rowTrigger.dataset.billId);
+    if (!b) return;
+    if (b.kind === "Ferramenta") openToolForm(b);
+    else if (b.kind === "Parcelado") openInstallmentForm(b);
+  }
 });
 document.getElementById("modalClose").addEventListener("click", closeBillModal);
 document.getElementById("billModalOverlay").addEventListener("click", e => { if (e.target.id === "billModalOverlay") closeBillModal(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeBillModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { closeBillModal(); closeFormModal(); } });
 
 // ---------------- Clientes ----------------
 function clientRowHTML(c) {

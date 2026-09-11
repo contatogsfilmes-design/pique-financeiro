@@ -128,6 +128,8 @@
   tbody td{ padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
   tbody tr:last-child td{ border-bottom:none; }
   .table-wrap{ overflow-x:auto; }
+  tr.row-click{ cursor:pointer; }
+  tr.row-click:hover td{ background:var(--surface-2); }
 
   .badge{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:600; }
   .badge.ativo{ background:var(--positive-soft); color:var(--positive); }
@@ -156,6 +158,9 @@
   .modal-status-toggle button.on[data-st="pago"]{ background:var(--positive-soft); border-color:var(--positive); color:var(--positive); }
   .modal-status-toggle button.on[data-st="pendente"]{ background:var(--zero-soft); border-color:var(--zero); color:var(--zero); }
   .modal-note{ font-size:12px; color:var(--ink-soft); background:var(--surface-2); border-radius:9px; padding:10px 12px; line-height:1.5; }
+  .form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .form-grid .full{ grid-column:1 / -1; }
+  @media (max-width:480px){ .form-grid{ grid-template-columns:1fr; } }
 
   .btn{ display:inline-flex; align-items:center; gap:6px; border:1px solid var(--border); background:var(--surface); color:var(--ink); padding:8px 14px; border-radius:9px; font-size:13px; font-weight:600; cursor:pointer; }
   .btn:hover{ border-color:var(--ink-faint); }
@@ -233,12 +238,17 @@
   .emp-avatar{ width:38px; height:38px; border-radius:50%; background:var(--accent-soft); color:#8A5A16; display:flex; align-items:center; justify-content:center; font-family:"League Spartan"; font-weight:700; font-size:14px; flex:none; }
   .emp-name{ font-weight:600; font-size:14px; }
   .emp-role{ font-size:12px; color:var(--ink-faint); }
-  .emp-base{ margin-left:auto; text-align:right; }
+  .emp-info{ cursor:pointer; border-radius:6px; }
+  .emp-base{ margin-left:auto; text-align:right; cursor:pointer; border-radius:6px; padding:2px 4px; }
+  .emp-info:hover, .emp-base:hover{ background:var(--surface-2); }
   .emp-base .stat-label{ font-size:10.5px; }
   .emp-base .num{ font-size:14px; font-weight:600; }
+  .emp-top > .btn-ghost{ flex:none; padding:4px 2px; }
   .exp-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px; border-top:1px dashed var(--border); padding-top:10px; }
-  .exp-list li{ display:flex; justify-content:space-between; align-items:center; font-size:12.5px; color:var(--ink-soft); gap:8px; }
-  .exp-list li span:first-child{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .exp-list li{ display:flex; justify-content:space-between; align-items:center; font-size:12.5px; color:var(--ink-soft); gap:8px; cursor:pointer; border-radius:6px; }
+  .exp-list li:hover{ background:var(--surface-2); }
+  .exp-list li span:first-child{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .exp-list li .btn-ghost{ padding:2px 4px; font-size:11px; flex:none; }
   .emp-total{ display:flex; justify-content:space-between; align-items:center; padding-top:10px; border-top:1px solid var(--border); gap:8px; }
   .emp-total b{ font-family:"IBM Plex Mono"; font-size:15px; }
   .add-exp-row{ display:flex; gap:6px; margin-top:2px; }
@@ -558,6 +568,14 @@
     <div class="modal-head"><h3 id="modalTitle">Conta</h3><button class="modal-close" id="modalClose" type="button" aria-label="Fechar">✕</button></div>
     <div class="modal-body" id="modalBody"></div>
     <div class="modal-foot" id="modalFoot"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="formModalOverlay">
+  <div class="modal" style="max-width:500px;">
+    <div class="modal-head"><h3 id="formModalTitle">Novo</h3><button class="modal-close" id="formModalClose" type="button" aria-label="Fechar">✕</button></div>
+    <div class="modal-body" id="formModalBody"></div>
+    <div class="modal-foot" id="formModalFoot"></div>
   </div>
 </div>
 
