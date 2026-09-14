@@ -1,12 +1,12 @@
-# Pique Financeiro
+# Financeiro T-Rec
 
-Sistema de gestão financeira da Pique Studio: contas a pagar (calendário + quadro), custos mensais (ferramentas, parcelamentos, folha), clientes, notas fiscais e controle de acesso da equipe.
+Sistema de gestão financeira da T-Rec Studio: contas a pagar (calendário + quadro), custos mensais (ferramentas, parcelamentos, folha), clientes, notas fiscais e controle de acesso da equipe.
 
 Stack: HTML/CSS/JS puro (sem build), Firebase Auth (login Google) e Cloud Firestore (dados). Hospedado no GitHub Pages. Roda 100% no plano gratuito (Spark) — **sem precisar do plano Blaze/cartão de crédito**.
 
 ## Por que não tem Firebase Storage
 
-O Google passou a exigir o plano Blaze (com cartão cadastrado) até pra usar o Storage dentro da faixa gratuita. Como o Pique Financeiro é só pra duas pessoas, não vale a pena depender disso. Em vez de Storage:
+O Google passou a exigir o plano Blaze (com cartão cadastrado) até pra usar o Storage dentro da faixa gratuita. Como o Financeiro T-Rec é só pra duas pessoas, não vale a pena depender disso. Em vez de Storage:
 
 - **Foto de perfil**: é redimensionada no navegador (fica pequena, ~poucos KB) e guardada direto como imagem no seu documento no Firestore.
 - **Notas fiscais**: você guarda o arquivo (PDF/foto) onde já guarda hoje — Google Drive, WhatsApp Web, etc. — e cola o link no sistema junto com prestador, descrição e valor. `storage.rules` continua no repositório só como referência, caso um dia decida migrar pro Blaze.

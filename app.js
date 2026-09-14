@@ -1,4 +1,4 @@
-/* Pique Financeiro — lógica do app.
+/* Financeiro T-Rec — lógica do app.
    Fonte de verdade dos dados: Firestore, doc empresas/pique/estado/dados.
    Acesso: lista fixa de e-mails (ver ALLOWED_EMAILS abaixo E firestore.rules —
    as duas listas precisam ser iguais). Pra liberar mais alguém, adiciona o
@@ -135,11 +135,11 @@ function subscribeState() {
 // ---------------- tabs ----------------
 const titles = {
   dashboard: ["Dashboard", "Visão geral do caixa, contas e operação"],
-  contas: ["Contas a Pagar", "Calendário e quadro de vencimentos de todas as contas da Pique"],
+  contas: ["Contas a Pagar", "Calendário e quadro de vencimentos de todas as contas da T-Rec"],
   custos: ["Custos Mensais", "Ferramentas, parcelamentos e folha de pagamento"],
   clientes: ["Clientes", "Cadastro, status e recorrência de pagamento"],
   notas: ["Notas Fiscais", "Arquivo de comprovantes por prestador de serviço"],
-  equipe: ["Equipe & Acesso", "Quem pode entrar no financeiro da Pique e com qual permissão"],
+  equipe: ["Equipe & Acesso", "Quem pode entrar no financeiro da T-Rec e com qual permissão"],
 };
 document.querySelectorAll(".nav-item").forEach(btn => {
   btn.addEventListener("click", () => {
