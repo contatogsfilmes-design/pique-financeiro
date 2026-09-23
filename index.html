@@ -277,6 +277,18 @@
   .pay-toggle input:checked + .pay-dot{ background:var(--positive); border-color:var(--positive); }
   .new-client-form{ display:none; grid-template-columns:1.4fr 1fr 1fr 1fr auto; gap:10px; align-items:end; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:16px; }
   .new-client-form.open{ display:grid; }
+  .freela-month{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .freela-month .cal-title{ text-transform:capitalize; }
+  .freela-sub{ display:block; font-size:11.5px; color:var(--ink-faint); margin-top:2px; }
+  .badge.parcial{ background:var(--accent-soft); color:var(--accent); }
+  .badge.atrasado{ background:var(--negative-soft); color:var(--negative); }
+  .parc-list{ display:flex; flex-direction:column; gap:8px; }
+  .parc-row{ display:grid; grid-template-columns:auto 1fr 1fr auto; gap:8px; align-items:center; font-size:12.5px; }
+  .parc-row input{ width:100%; font-size:13px; border:1px solid var(--border); border-radius:8px; padding:7px 9px; background:var(--surface-2); color:var(--ink); font-family:inherit; }
+  .parc-row .pay-toggle{ display:inline-flex; margin:0; text-transform:none; letter-spacing:normal; font-size:12px; font-weight:500; color:var(--ink-soft); min-width:84px; }
+  .parc-row .parc-n{ font-family:"Space Mono"; color:var(--ink-faint); min-width:34px; }
+  .parc-sum{ font-size:12px; color:var(--ink-soft); }
+  .parc-sum.warn{ color:var(--negative); }
   .field label{ display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); margin-bottom:5px; font-weight:600; }
   .field input, .field select{ width:100%; font-size:13px; border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--surface); color:var(--ink); }
   .empty-hint{ color:var(--ink-faint); font-size:12.5px; padding:14px 4px; }
@@ -368,6 +380,7 @@
       <button class="nav-item" data-tab="contas"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3.5" width="15" height="14" rx="2"/><path d="M2.5 8h15M6.5 2v3M13.5 2v3"/><path d="M6.5 12l1.8 1.8L10.5 11" /></svg>Contas a Pagar</button>
       <button class="nav-item" data-tab="custos"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 6.5L10 2.5l7.5 4v7L10 17.5l-7.5-4v-7Z"/><path d="M2.5 6.5L10 10.5l7.5-4M10 10.5v7"/></svg>Custos Mensais</button>
       <button class="nav-item" data-tab="clientes"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="6.5" r="3"/><path d="M1.8 17c.5-3.2 2.7-5 5.2-5s4.7 1.8 5.2 5"/><circle cx="14.5" cy="7.5" r="2.3"/><path d="M13 17c.3-2.5 1.8-4 3.4-4.3"/></svg>Clientes</button>
+      <button class="nav-item" data-tab="freelas"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5.5" width="11.5" height="9" rx="1.6"/><path d="M13.5 8.5l4.5-2.5v8l-4.5-2.5"/><circle cx="6" cy="10" r="1.3"/></svg>Freelances</button>
       <button class="nav-item" data-tab="notas"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 2.5h7l3.5 3.5V17a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1Z"/><path d="M12 2.5V6h3.5M6.5 10.5h7M6.5 13.5h5"/></svg>Notas Fiscais</button>
       <button class="nav-item" data-tab="equipe"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7.5" cy="7" r="3"/><path d="M2 17c.4-3.2 2.6-5 5.5-5s5.1 1.8 5.5 5"/><path d="M14.8 4.5v5M12.3 7h5"/></svg>Equipe &amp; Acesso</button>
     </nav>
@@ -399,7 +412,7 @@
 
       <div class="panel-row">
         <div class="card">
-          <div class="card-head"><div><h2>Receita × Custos deste mês</h2><p>Clientes ativos contra contas em aberto</p></div></div>
+          <div class="card-head"><div><h2>Receita × Custos deste mês</h2><p>Clientes ativos + freelances do mês contra contas em aberto</p></div></div>
           <div class="chart-wrap" id="chart"></div>
           <div class="legend"><span><i style="background:var(--positive)"></i>Receita ativa</span><span><i style="background:var(--negative)"></i>Custos em aberto</span></div>
         </div>
@@ -418,10 +431,10 @@
       </div>
 
       <div class="card">
-        <div class="card-head"><div><h2>Projeção de lucro bruto</h2><p>Receita de clientes ativos menos custos mensais recorrentes</p></div></div>
+        <div class="card-head"><div><h2>Projeção de lucro bruto</h2><p>Clientes ativos + freelances previstos pro mês, menos custos mensais recorrentes</p></div></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Mês</th><th>Receita prevista</th><th>Custos previstos</th><th>Lucro bruto estimado</th></tr></thead>
+            <thead><tr><th>Mês</th><th>Clientes fixos</th><th>Freelances</th><th>Custos previstos</th><th>Lucro bruto estimado</th></tr></thead>
             <tbody id="projBody"></tbody>
           </table>
         </div>
@@ -525,6 +538,41 @@
           <table>
             <thead><tr><th>Cliente</th><th>Valor mensal</th><th>Dia pgto</th><th>Status</th><th>Pago este mês</th><th></th></tr></thead>
             <tbody id="clientsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= FREELANCES ================= -->
+    <section id="tab-freelas" class="tab-panel">
+      <div class="freela-month">
+        <div class="cal-nav"><button id="freelaPrev" aria-label="Mês anterior" type="button">‹</button><span class="cal-title" id="freelaMonthTitle"></span><button id="freelaNext" aria-label="Próximo mês" type="button">›</button></div>
+        <button class="btn btn-accent admin-only" id="btnNewFreela" type="button">+ Novo freela</button>
+      </div>
+      <div class="chips" style="margin-bottom:16px;">
+        <div class="chip"><span id="chipFreelaQtd">0</span> trabalhos no mês</div>
+        <div class="chip">Fechado no mês <b id="chipFreelaFechado">R$ 0,00</b></div>
+        <div class="chip">Entra no caixa no mês <b id="chipFreelaEntra">R$ 0,00</b></div>
+        <div class="chip">Já recebido <b id="chipFreelaRecebido">R$ 0,00</b></div>
+      </div>
+
+      <div class="section-head"><h2>Trabalhos do mês</h2></div>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Trabalho</th><th>Tipo</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Recebido</th></tr></thead>
+            <tbody id="freelasBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section-head" style="margin-top:22px;"><h2>Recebimentos previstos no mês</h2></div>
+      <p class="stat-sub" style="margin-top:-8px; margin-bottom:12px;">Inclui parcelas de trabalhos feitos em meses anteriores. É isso que entra na projeção de lucro do Dashboard.</p>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Trabalho</th><th>Parcela</th><th>Vencimento</th><th>Valor</th><th>Recebido</th></tr></thead>
+            <tbody id="freelaRecebBody"></tbody>
           </table>
         </div>
       </div>

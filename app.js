@@ -36,7 +36,10 @@ let currentModalId = null;
 let billFilter = "todos";
 let saveTimer = null;
 
-const state = { bills: [], tags: DEFAULT_TAGS.slice(), clients: [], employees: [], notas: [], caixaAtual: 0 };
+let freelaYear = TODAY.getFullYear();
+let freelaMonth = TODAY.getMonth();
+
+const state = { bills: [], tags: DEFAULT_TAGS.slice(), clients: [], employees: [], notas: [], freelas: [], caixaAtual: 0 };
 
 // ---------------- helpers ----------------
 function brl(n) { return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
@@ -104,6 +107,21 @@ function payPillMeta(b) {
 }
 function displayTitle(b) { return (b.kind === "Parcelado" && b.parcelas) ? `${b.title} · ${b.parcelaAtual}/${b.parcelas}` : b.title; }
 function getActiveRevenue() { return state.clients.filter(c => c.status === "ativo").reduce((s, c) => s + Number(c.valor || 0), 0); }
+function monthKeyOf(y, m) { return `${y}-${String(m + 1).padStart(2, "0")}`; }
+function addMonthsISO(iso, k) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const target = new Date(y, m - 1 + k, 1);
+  const last = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return isoOf(new Date(target.getFullYear(), target.getMonth(), Math.min(d, last)));
+}
+// Receita de freelances num mês = soma das parcelas que vencem naquele mês
+// (não do valor fechado), pra projeção refletir quando o dinheiro entra de fato.
+function freelaParcelasDoMes(key) {
+  const out = [];
+  (state.freelas || []).forEach(f => (f.parcelas || []).forEach((p, idx) => { if (p.venc && p.venc.slice(0, 7) === key) out.push({ f, p, idx }); }));
+  return out.sort((a, b) => a.p.venc.localeCompare(b.p.venc));
+}
+function freelaRevenue(key) { return freelaParcelasDoMes(key).reduce((s, x) => s + Number(x.p.valor || 0), 0); }
 function empTotal(emp) { return Number(emp.base || 0) + (emp.despesas || []).reduce((s, d) => s + Number(d.valor || 0), 0); }
 
 // ---------------- persistence ----------------
@@ -115,7 +133,7 @@ function saveNow() {
   if (!currentMember || currentMember.role !== "admin") return;
   db.doc("empresas/pique/estado/dados").set({
     bills: state.bills, tags: state.tags, clients: state.clients, employees: state.employees,
-    notas: state.notas, caixaAtual: state.caixaAtual,
+    notas: state.notas, freelas: state.freelas, caixaAtual: state.caixaAtual,
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser ? currentUser.email : null,
   }).catch(err => console.error("Erro ao salvar:", err));
 }
@@ -127,6 +145,7 @@ function subscribeState() {
     state.clients = data.clients || [];
     state.employees = data.employees || [];
     state.notas = data.notas || [];
+    state.freelas = data.freelas || [];
     state.caixaAtual = data.caixaAtual || 0;
     renderAll();
   }, err => console.error("Erro ao ler estado:", err));
@@ -138,6 +157,7 @@ const titles = {
   contas: ["Contas a Pagar", "Calendário e quadro de vencimentos de todas as contas da T-Rec"],
   custos: ["Custos Mensais", "Ferramentas, parcelamentos e folha de pagamento"],
   clientes: ["Clientes", "Cadastro, status e recorrência de pagamento"],
+  freelas: ["Freelances", "Trabalhos avulsos do mês e quando cada pagamento entra no caixa"],
   notas: ["Notas Fiscais", "Arquivo de comprovantes por prestador de serviço"],
   equipe: ["Equipe & Acesso", "Quem pode entrar no financeiro da T-Rec e com qual permissão"],
 };
@@ -744,6 +764,201 @@ document.getElementById("clientsBody").addEventListener("change", e => {
   }
 });
 
+// ---------------- Freelances ----------------
+// Trabalhos avulsos (captação, aftermovie, edição…). Cada freela guarda a lista
+// de parcelas com vencimento — é por ela que a receita cai no mês certo.
+const FREELA_TIPOS = ["Captação de evento", "Aftermovie", "Edição", "Fotografia", "Vídeo institucional", "Outro"];
+const FREELA_FORMAS = { avista: "À vista", parcelado: "Parcelado", entrada: "Entrada + restante" };
+function freelaPagamentoLabel(f) {
+  const n = (f.parcelas || []).length;
+  const forma = f.forma === "parcelado" ? `${n}x` : f.forma === "entrada" ? `Entrada + ${Math.max(0, n - 1)}x` : "À vista";
+  return forma + (f.metodo ? " · " + f.metodo : "");
+}
+function freelaStatusBadge(f) {
+  const ps = f.parcelas || [];
+  const pagas = ps.filter(p => p.pago).length;
+  if (ps.length && pagas === ps.length) return '<span class="badge ativo">Recebido</span>';
+  if (ps.some(p => !p.pago && p.venc && p.venc < TODAY_ISO)) return `<span class="badge atrasado">Atrasado · ${pagas}/${ps.length}</span>`;
+  if (pagas) return `<span class="badge parcial">${pagas}/${ps.length} recebidas</span>`;
+  return '<span class="badge pausado">A receber</span>';
+}
+function renderFreelas() {
+  const key = monthKeyOf(freelaYear, freelaMonth);
+  document.getElementById("freelaMonthTitle").textContent = new Date(freelaYear, freelaMonth, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  const doMes = (state.freelas || []).filter(f => (f.data || "").slice(0, 7) === key).sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+  document.getElementById("freelasBody").innerHTML = doMes.length ? doMes.map(f => `
+    <tr class="row-click" data-freela-id="${f.id}">
+      <td>${escapeHtml(f.titulo)}${f.cliente ? `<span class="freela-sub">${escapeHtml(f.cliente)}</span>` : ""}</td>
+      <td>${escapeHtml(f.tipo || "")}</td><td>${fmtDate(f.data)}</td><td class="num">${brl(f.valor)}</td>
+      <td>${escapeHtml(freelaPagamentoLabel(f))}</td><td>${freelaStatusBadge(f)}</td>
+    </tr>`).join("") : '<tr><td colspan="6" class="empty-hint">Nenhum freela lançado neste mês.</td></tr>';
+  const receb = freelaParcelasDoMes(key);
+  document.getElementById("freelaRecebBody").innerHTML = receb.length ? receb.map(({ f, p, idx }) => `
+    <tr data-freela-id="${f.id}" data-idx="${idx}">
+      <td>${escapeHtml(f.titulo)}${f.cliente ? `<span class="freela-sub">${escapeHtml(f.cliente)}</span>` : ""}</td>
+      <td>${f.parcelas.length > 1 ? (f.forma === "entrada" && idx === 0 ? "Entrada" : `${idx + 1}/${f.parcelas.length}`) : "Única"}</td>
+      <td class="${!p.pago && p.venc < TODAY_ISO ? "neg" : ""}">${fmtDateFull(p.venc)}</td><td class="num">${brl(p.valor)}</td>
+      <td><label class="pay-toggle"><input type="checkbox" data-action="freela-pago" ${p.pago ? "checked" : ""}><span class="pay-dot"></span>${p.pago ? "Recebido " + fmtDate(p.pagoEm) : "Pendente"}</label></td>
+    </tr>`).join("") : '<tr><td colspan="5" class="empty-hint">Nenhum recebimento de freela previsto neste mês.</td></tr>';
+  document.getElementById("chipFreelaQtd").textContent = doMes.length;
+  document.getElementById("chipFreelaFechado").textContent = brl(doMes.reduce((s, f) => s + Number(f.valor || 0), 0));
+  document.getElementById("chipFreelaEntra").textContent = brl(receb.reduce((s, x) => s + Number(x.p.valor || 0), 0));
+  document.getElementById("chipFreelaRecebido").textContent = brl(receb.filter(x => x.p.pago).reduce((s, x) => s + Number(x.p.valor || 0), 0));
+}
+document.getElementById("freelaPrev").addEventListener("click", () => { freelaMonth--; if (freelaMonth < 0) { freelaMonth = 11; freelaYear--; } renderFreelas(); });
+document.getElementById("freelaNext").addEventListener("click", () => { freelaMonth++; if (freelaMonth > 11) { freelaMonth = 0; freelaYear++; } renderFreelas(); });
+document.getElementById("btnNewFreela").addEventListener("click", () => { if (!requireAdmin()) return; openFreelaForm(null); });
+document.getElementById("freelasBody").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-freela-id]");
+  const f = tr && state.freelas.find(x => x.id === tr.dataset.freelaId);
+  if (f) openFreelaForm(f);
+});
+document.getElementById("freelaRecebBody").addEventListener("change", e => {
+  if (e.target.dataset.action !== "freela-pago") return;
+  if (!requireAdmin()) { renderFreelas(); return; }
+  const tr = e.target.closest("tr");
+  const f = state.freelas.find(x => x.id === tr.dataset.freelaId);
+  const p = f && f.parcelas[Number(tr.dataset.idx)];
+  if (!p) return;
+  p.pago = e.target.checked;
+  if (p.pago) p.pagoEm = TODAY_ISO; else delete p.pagoEm;
+  renderAll();
+  scheduleSave();
+});
+// Gera as parcelas a partir da forma de pagamento. Mantém o "recebido" das
+// parcelas que já existiam na mesma posição, pra não perder o que já foi marcado.
+function buildFreelaParcelas(forma, total, n, primeiro, entrada, anteriores) {
+  const cents = Math.round(total * 100);
+  let valores = [];
+  if (forma === "avista") valores = [cents];
+  else if (forma === "parcelado") {
+    const base = Math.floor(cents / n);
+    valores = Array.from({ length: n }, (_, i) => base + (i < cents - base * n ? 1 : 0));
+  } else {
+    const ent = Math.min(cents, Math.round(entrada * 100));
+    const resto = cents - ent;
+    const base = Math.floor(resto / n);
+    valores = [ent].concat(Array.from({ length: n }, (_, i) => base + (i < resto - base * n ? 1 : 0)));
+  }
+  return valores.map((v, i) => {
+    const old = (anteriores || [])[i] || {};
+    const p = { valor: v / 100, venc: addMonthsISO(primeiro, i), pago: !!old.pago };
+    if (old.pago) p.pagoEm = old.pagoEm || TODAY_ISO;
+    return p;
+  });
+}
+function openFreelaForm(f) {
+  const isEdit = !!f;
+  const readOnly = !currentMember || currentMember.role !== "admin";
+  const dis = readOnly ? "disabled" : "";
+  const defaultData = (freelaYear === TODAY.getFullYear() && freelaMonth === TODAY.getMonth()) ? TODAY_ISO : `${monthKeyOf(freelaYear, freelaMonth)}-01`;
+  const forma = isEdit ? f.forma : "avista";
+  const ps = isEdit ? f.parcelas : [];
+  let parcelas = ps.map(p => Object.assign({}, p));
+  const nInicial = isEdit ? Math.max(1, forma === "entrada" ? ps.length - 1 : ps.length) : 2;
+  document.getElementById("formModalTitle").textContent = isEdit ? "Editar freela" : "Novo freela";
+  document.getElementById("formModalBody").innerHTML = `
+    <div class="form-grid">
+      <div class="modal-field full"><label>Trabalho</label><input type="text" id="ffTitulo" placeholder="Ex: Aftermovie casamento Ana &amp; Leo" value="${isEdit ? escapeHtml(f.titulo) : ""}" ${dis}></div>
+      <div class="modal-field"><label>Cliente</label><input type="text" id="ffCliente" value="${isEdit ? escapeHtml(f.cliente || "") : ""}" ${dis}></div>
+      <div class="modal-field"><label>Tipo</label><input type="text" id="ffTipo" list="ffTipos" value="${isEdit ? escapeHtml(f.tipo || "") : ""}" placeholder="Escolha ou escreva" ${dis}>
+        <datalist id="ffTipos">${FREELA_TIPOS.map(t => `<option value="${t}">`).join("")}</datalist></div>
+      <div class="modal-field"><label>Data do trabalho</label><input type="date" id="ffData" value="${isEdit ? f.data : defaultData}" ${dis}></div>
+      <div class="modal-field"><label>Valor total</label><input type="text" id="ffValor" value="${isEdit ? brl(f.valor) : ""}" placeholder="R$ 0,00" ${dis}></div>
+      <div class="modal-field"><label>Forma de pagamento</label><select id="ffForma" ${dis}>${Object.entries(FREELA_FORMAS).map(([k, v]) => `<option value="${k}" ${forma === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+      <div class="modal-field"><label>Meio</label><select id="ffMetodo" ${dis}>${PAYMENT_METHODS.map(m => `<option value="${m}" ${isEdit && f.metodo === m ? "selected" : ""}>${m}</option>`).join("")}</select></div>
+      <div class="modal-field" id="ffEntradaWrap"><label>Valor da entrada</label><input type="text" id="ffEntrada" value="${isEdit && forma === "entrada" && ps[0] ? brl(ps[0].valor) : ""}" placeholder="R$ 0,00 (padrão 50%)" ${dis}></div>
+      <div class="modal-field" id="ffNWrap"><label id="ffNLabel">Nº de parcelas</label><input type="number" id="ffN" min="1" max="24" value="${nInicial}" ${dis}></div>
+      <div class="modal-field"><label id="ffPrimeiroLabel">Primeiro recebimento</label><input type="date" id="ffPrimeiro" value="${isEdit && ps[0] ? ps[0].venc : (isEdit ? f.data : defaultData)}" ${dis}></div>
+      <div class="modal-field full"><label>Parcelas</label><div class="parc-list" id="ffParcelas"></div><div class="parc-sum" id="ffParcSum"></div></div>
+      <div class="modal-field full"><label>Observação</label><input type="text" id="ffObs" value="${isEdit ? escapeHtml(f.obs || "") : ""}" ${dis}></div>
+    </div>`;
+  document.getElementById("formModalFoot").innerHTML = `
+    ${(isEdit && !readOnly) ? '<button class="btn btn-ghost" id="ffDelete" type="button" style="color:var(--negative);">Excluir freela</button>' : "<span></span>"}
+    <div style="display:flex; gap:8px;">
+      <button class="btn" id="ffCancel" type="button">${readOnly ? "Fechar" : "Cancelar"}</button>
+      ${readOnly ? "" : '<button class="btn btn-accent" id="ffSave" type="button">Salvar</button>'}
+    </div>`;
+  const $ = id => document.getElementById(id);
+  const syncVisibility = () => {
+    const fm = $("ffForma").value;
+    $("ffEntradaWrap").style.display = fm === "entrada" ? "" : "none";
+    $("ffNWrap").style.display = fm === "avista" ? "none" : "";
+    $("ffNLabel").textContent = fm === "entrada" ? "Restante em quantas vezes" : "Nº de parcelas";
+    $("ffPrimeiroLabel").textContent = fm === "avista" ? "Data do recebimento" : fm === "entrada" ? "Data da entrada" : "Primeira parcela";
+  };
+  const renderParcelas = () => {
+    $("ffParcelas").innerHTML = parcelas.map((p, i) => `
+      <div class="parc-row" data-idx="${i}">
+        <span class="parc-n">${$("ffForma").value === "entrada" && i === 0 ? "Ent." : (i + 1) + "ª"}</span>
+        <input type="text" data-k="valor" value="${brl(p.valor)}" ${dis}>
+        <input type="date" data-k="venc" value="${p.venc}" ${dis}>
+        <label class="pay-toggle"><input type="checkbox" data-k="pago" ${p.pago ? "checked" : ""} ${dis}><span class="pay-dot"></span>${p.pago ? "Recebido" : "Pendente"}</label>
+      </div>`).join("");
+    const soma = parcelas.reduce((s, p) => s + Number(p.valor || 0), 0);
+    const total = parseBRL($("ffValor").value);
+    const diff = Math.abs(soma - total) > 0.009;
+    $("ffParcSum").className = "parc-sum" + (diff ? " warn" : "");
+    $("ffParcSum").textContent = parcelas.length ? `Soma das parcelas: ${brl(soma)}${diff ? ` — diferente do valor total (${brl(total)})` : ""}` : "Preencha o valor total pra gerar as parcelas.";
+  };
+  const regenerate = () => {
+    const total = parseBRL($("ffValor").value);
+    const fm = $("ffForma").value;
+    const n = Math.min(24, Math.max(1, parseInt($("ffN").value, 10) || 1));
+    const entradaTxt = $("ffEntrada").value.trim();
+    const entrada = entradaTxt ? parseBRL(entradaTxt) : total / 2;
+    const primeiro = $("ffPrimeiro").value || $("ffData").value || TODAY_ISO;
+    parcelas = total ? buildFreelaParcelas(fm, total, n, primeiro, entrada, parcelas) : [];
+    renderParcelas();
+  };
+  syncVisibility();
+  if (isEdit) renderParcelas(); else regenerate();
+  $("ffCancel").addEventListener("click", closeFormModal);
+  if (!readOnly) {
+    $("ffForma").addEventListener("change", () => { syncVisibility(); regenerate(); });
+    ["ffValor", "ffN", "ffEntrada", "ffPrimeiro"].forEach(id => $(id).addEventListener("change", regenerate));
+    let primeiroTocado = isEdit;
+    $("ffPrimeiro").addEventListener("input", () => { primeiroTocado = true; });
+    $("ffData").addEventListener("change", () => { if (!primeiroTocado) { $("ffPrimeiro").value = $("ffData").value; regenerate(); } });
+    $("ffParcelas").addEventListener("change", e => {
+      const row = e.target.closest(".parc-row"); if (!row) return;
+      const p = parcelas[Number(row.dataset.idx)];
+      const k = e.target.dataset.k;
+      if (k === "valor") p.valor = parseBRL(e.target.value);
+      else if (k === "venc") p.venc = e.target.value || p.venc;
+      else if (k === "pago") { p.pago = e.target.checked; if (p.pago) p.pagoEm = TODAY_ISO; else delete p.pagoEm; }
+      renderParcelas();
+    });
+    $("ffSave").addEventListener("click", () => {
+      const titulo = $("ffTitulo").value.trim();
+      if (!titulo) { $("ffTitulo").focus(); return; }
+      const valor = parseBRL($("ffValor").value);
+      if (!valor) { $("ffValor").focus(); return; }
+      if (!parcelas.length) regenerate();
+      const dados = {
+        titulo, cliente: $("ffCliente").value.trim(), tipo: $("ffTipo").value.trim(),
+        data: $("ffData").value || TODAY_ISO, valor, forma: $("ffForma").value, metodo: $("ffMetodo").value,
+        parcelas, obs: $("ffObs").value.trim(),
+      };
+      if (isEdit) Object.assign(f, dados);
+      else state.freelas.push(Object.assign({ id: "freela-" + uid(), criadoPor: currentUser ? currentUser.email : null }, dados));
+      const [y, m] = dados.data.split("-").map(Number);
+      freelaYear = y; freelaMonth = m - 1;
+      closeFormModal();
+      renderAll();
+      scheduleSave();
+    });
+    if (isEdit) $("ffDelete").addEventListener("click", () => {
+      if (!confirm("Excluir este freela? Essa ação não pode ser desfeita.")) return;
+      state.freelas = state.freelas.filter(x => x.id !== f.id);
+      closeFormModal();
+      renderAll();
+      scheduleSave();
+    });
+  }
+  document.getElementById("formModalOverlay").classList.add("open");
+}
+
 // ---------------- Notas Fiscais ----------------
 // Sem Storage pago: o arquivo em si fica guardado onde você já usa (Drive, etc.)
 // e aqui a gente só arquiva o link junto com prestador/descrição/valor/data.
@@ -781,7 +996,7 @@ document.getElementById("uploadForm").addEventListener("submit", e => {
 
 // ---------------- Dashboard ----------------
 function renderChart() {
-  const receita = getActiveRevenue();
+  const receita = getActiveRevenue() + freelaRevenue(TODAY_ISO.slice(0, 7));
   const custos = state.bills.filter(b => b.status !== "pago").reduce((s, b) => s + b.value, 0);
   const max = Math.max(receita, custos, 1);
   document.getElementById("chart").innerHTML = `
@@ -789,7 +1004,8 @@ function renderChart() {
     <div class="chart-col"><div class="chart-bars"><div class="bar out" style="height:${(custos / max * 118).toFixed(0)}px"></div></div><span>${brl(custos)}</span></div>`;
 }
 function updateDashboardStats() {
-  const receber = getActiveRevenue();
+  const freelaMes = freelaParcelasDoMes(TODAY_ISO.slice(0, 7));
+  const receber = getActiveRevenue() + freelaMes.reduce((s, x) => s + Number(x.p.valor || 0), 0);
   const pagar = state.bills.filter(b => b.status !== "pago").reduce((s, b) => s + b.value, 0);
   const saldo = receber - pagar;
   document.getElementById("statCaixa").textContent = brl(state.caixaAtual);
@@ -798,7 +1014,8 @@ function updateDashboardStats() {
   const saldoEl = document.getElementById("statSaldo");
   saldoEl.textContent = (saldo < 0 ? "−" : "") + brl(Math.abs(saldo));
   saldoEl.className = "stat-value num " + (saldo > 0 ? "pos" : saldo < 0 ? "neg" : "zero-c");
-  document.getElementById("statReceberSub").textContent = state.clients.filter(c => c.status === "ativo").length + " clientes ativos";
+  const nFreelas = new Set(freelaMes.map(x => x.f.id)).size;
+  document.getElementById("statReceberSub").textContent = state.clients.filter(c => c.status === "ativo").length + " clientes ativos" + (nFreelas ? ` · ${nFreelas} freela${nFreelas > 1 ? "s" : ""}` : "");
   document.getElementById("statPagarSub").textContent = state.bills.filter(b => b.status !== "pago").length + " contas em aberto";
 }
 function renderCostPie() {
@@ -829,12 +1046,15 @@ function renderProjection() {
   const nonPayroll = state.bills.filter(b => b.tagId !== "custo-funcionario" && b.tagId !== "salario").reduce((s, b) => s + b.value, 0);
   const empBaseTotal = state.employees.reduce((s, e) => s + Number(e.base || 0), 0);
   const recurring = nonPayroll + empBaseTotal;
-  const lucro = receita - recurring;
-  const months = [1, 2, 3].map(delta => {
+  const months = [0, 1, 2, 3].map(delta => {
     const d = new Date(TODAY.getFullYear(), TODAY.getMonth() + delta, 1);
-    return d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    return { label: d.toLocaleDateString("pt-BR", { month: "long", year: "numeric" }), key: monthKeyOf(d.getFullYear(), d.getMonth()) };
   });
-  document.getElementById("projBody").innerHTML = months.map(m => `<tr><td style="text-transform:capitalize;">${m}</td><td class="num">${brl(receita)}</td><td class="num">${brl(recurring)}</td><td class="num ${lucro > 0 ? "pos" : lucro < 0 ? "neg" : "zero-c"}">${lucro < 0 ? "−" : ""}${brl(Math.abs(lucro))}</td></tr>`).join("");
+  document.getElementById("projBody").innerHTML = months.map(m => {
+    const freela = freelaRevenue(m.key);
+    const lucro = receita + freela - recurring;
+    return `<tr><td style="text-transform:capitalize;">${m.label}</td><td class="num">${brl(receita)}</td><td class="num">${brl(freela)}</td><td class="num">${brl(recurring)}</td><td class="num ${lucro > 0 ? "pos" : lucro < 0 ? "neg" : "zero-c"}">${lucro < 0 ? "−" : ""}${brl(Math.abs(lucro))}</td></tr>`;
+  }).join("");
 }
 function renderAvisos() {
   const items = [];
@@ -848,6 +1068,11 @@ function renderAvisos() {
     if (c.status === "ativo" && !c.pago) items.push({ c: "var(--accent)", t: `${escapeHtml(c.nome)} ainda não pagou este mês` });
     else if (c.status === "novo") items.push({ c: "var(--zero)", t: `${escapeHtml(c.nome)} está cadastrado mas ainda não gravou nada` });
   });
+  (state.freelas || []).forEach(f => (f.parcelas || []).forEach((p, i) => {
+    if (p.pago || !p.venc) return;
+    const label = f.parcelas.length > 1 ? ` (parcela ${i + 1}/${f.parcelas.length})` : "";
+    if (p.venc < TODAY_ISO) items.push({ c: "var(--negative)", t: `Freela ${escapeHtml(f.titulo)}${label}: recebimento atrasado desde ${fmtDate(p.venc)} — ${brl(p.valor)}` });
+  }));
   document.getElementById("alertList").innerHTML = items.length
     ? items.map(i => `<li><span class="alert-dot" style="background:${i.c}"></span>${i.t}</li>`).join("")
     : '<li style="color:var(--ink-faint);">Tudo em dia por aqui.</li>';
@@ -864,7 +1089,7 @@ document.getElementById("tileCaixa").addEventListener("click", () => {
 // ---------------- master render ----------------
 function renderAll() {
   renderBoard(); renderCalendar(); renderToolsTable(); renderInstallmentsTable(); renderEmployees();
-  renderClients(); renderInvoices();
+  renderClients(); renderFreelas(); renderInvoices();
   updateChipEmAberto(); updateDashboardStats(); renderChart(); renderCostPie(); renderAvisos(); renderProjection();
 }
 
