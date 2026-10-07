@@ -47,6 +47,28 @@ const CUR_KEY = TODAY_ISO.slice(0, 7);
 const state = { bills: [], tags: DEFAULT_TAGS.slice(), clients: [], employees: [], notas: [], freelas: [], contas: [], movs: [], caixaAtual: 0 };
 
 // ---------------- helpers ----------------
+// Janelas de confirmação/pergunta próprias (as do navegador não funcionam
+// quando o app roda embutido, como na versão do iPad).
+function uiDialog({ msg, input, def, okText, cancelText }) {
+  return new Promise(resolve => {
+    const ov = document.getElementById("dialogOverlay");
+    document.getElementById("dialogMsg").textContent = msg;
+    const inp = document.getElementById("dialogInput");
+    inp.hidden = !input; inp.value = input ? (def == null ? "" : String(def)) : "";
+    const ok = document.getElementById("dialogOk"), cancel = document.getElementById("dialogCancel");
+    ok.textContent = okText || "OK";
+    cancel.hidden = cancelText === null; cancel.textContent = cancelText || "Cancelar";
+    const done = v => { ov.classList.remove("open"); ok.onclick = cancel.onclick = inp.onkeydown = null; resolve(v); };
+    ok.onclick = () => done(input ? inp.value : true);
+    cancel.onclick = () => done(input ? null : false);
+    inp.onkeydown = e => { if (e.key === "Enter") ok.onclick(); if (e.key === "Escape") cancel.onclick(); };
+    ov.classList.add("open");
+    (input ? inp : ok).focus();
+  });
+}
+function uiConfirm(msg) { return uiDialog({ msg, okText: "Confirmar" }); }
+function uiPrompt(msg, def) { return uiDialog({ msg, input: true, def }); }
+function uiAlert(msg) { return uiDialog({ msg, cancelText: null }); }
 function brl(n) { return (Number(n) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }); }
 function parseBRL(s) { return Number(String(s).replace(/[^\d,-]/g, "").replace(",", ".")) || 0; }
 function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -67,9 +89,9 @@ function tagOptionsHTML(selectedId) {
   return state.tags.map(t => `<option value="${t.id}" ${t.id === selectedId ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("") + '<option value="__new__">+ Nova tag…</option>';
 }
 function wireNewTagOption(selectEl, fallbackId) {
-  selectEl.addEventListener("change", e => {
+  selectEl.addEventListener("change", async e => {
     if (e.target.value !== "__new__") return;
-    const label = prompt("Nome da nova tag (ex: Marketing, Impostos):");
+    const label = await uiPrompt("Nome da nova tag (ex: Marketing, Impostos):");
     const id = label && addTag(label);
     if (!id) { e.target.value = fallbackId || ""; return; }
     const opt = document.createElement("option");
@@ -92,7 +114,7 @@ function addTag(label) {
 }
 function requireAdmin() {
   if (!currentMember || currentMember.role !== "admin") {
-    alert("Você está no modo Visualização — só administradores podem editar.");
+    uiAlert("Você está no modo Visualização — só administradores podem editar.");
     return false;
   }
   return true;
@@ -414,11 +436,11 @@ function renderCalendar() {
   }
   document.getElementById("calGrid").innerHTML = html;
 }
-document.getElementById("billFilters").addEventListener("click", e => {
+document.getElementById("billFilters").addEventListener("click", async e => {
   const btn = e.target.closest("button"); if (!btn) return;
   if (btn.id === "btnNewTag") {
     if (!requireAdmin()) return;
-    const label = prompt("Nome da nova tag (ex: Marketing, Impostos):");
+    const label = await uiPrompt("Nome da nova tag (ex: Marketing, Impostos):");
     if (!label) return;
     const id = addTag(label);
     if (!id) return;
@@ -431,9 +453,9 @@ document.getElementById("billFilters").addEventListener("click", e => {
   billFilter = btn.dataset.filter;
   renderFilterChips(); renderBoard(); renderCalendar(); updateChipEmAberto();
 });
-document.getElementById("btnNewTagDash").addEventListener("click", () => {
+document.getElementById("btnNewTagDash").addEventListener("click", async () => {
   if (!requireAdmin()) return;
-  const label = prompt("Nome da nova tag (ex: Marketing, Impostos):");
+  const label = await uiPrompt("Nome da nova tag (ex: Marketing, Impostos):");
   if (!label) return;
   addTag(label);
   renderFilterChips(); renderCostPie();
@@ -559,7 +581,7 @@ function syncValeMov(emp, d) {
   const conta = contaPadrao();
   d.movId = addMov({ tipo: "saida", valor: d.valor, data: d.data || TODAY_ISO, desc: `Vale · ${emp.nome}${d.desc ? " · " + d.desc : ""}`, contaId: conta ? conta.id : null, tagId: "custo-funcionario", origem: { tipo: "vale", ref: emp.id } }).id;
 }
-document.getElementById("empGrid").addEventListener("click", e => {
+document.getElementById("empGrid").addEventListener("click", async e => {
   const addBtn = e.target.closest('[data-action="emp-add-exp"]');
   if (addBtn) {
     if (!requireAdmin()) return;
@@ -589,7 +611,7 @@ document.getElementById("empGrid").addEventListener("click", e => {
     if (!emp) return;
     const idx = Number(delExpBtn.closest("li").dataset.idx);
     const d = emp.despesas[idx];
-    if (!confirm(isAdiantamento(d) ? "Excluir este vale? O lançamento dele no caixa também é removido." : "Excluir este gasto?")) return;
+    if (!await uiConfirm(isAdiantamento(d) ? "Excluir este vale? O lançamento dele no caixa também é removido." : "Excluir este gasto?")) return;
     if (d.movId) removeMovById(d.movId);
     emp.despesas.splice(idx, 1);
     syncEmployeeBill(emp);
@@ -610,7 +632,7 @@ document.getElementById("empGrid").addEventListener("click", e => {
     const card = delBtn.closest(".emp-card");
     const emp = state.employees.find(x => x.id === card.dataset.id);
     if (!emp) return;
-    if (!confirm(`Excluir ${emp.nome}? Isso também remove a conta de pagamento dele. Os lançamentos já feitos no caixa continuam. Essa ação não pode ser desfeita.`)) return;
+    if (!await uiConfirm(`Excluir ${emp.nome}? Isso também remove a conta de pagamento dele. Os lançamentos já feitos no caixa continuam. Essa ação não pode ser desfeita.`)) return;
     state.employees = state.employees.filter(x => x.id !== emp.id);
     state.bills = state.bills.filter(b => b.id !== emp.billId);
     renderAll();
@@ -626,9 +648,9 @@ document.getElementById("empGrid").addEventListener("click", e => {
     const idx = Number(editExpBtn.dataset.idx);
     const d = (emp.despesas || [])[idx];
     if (!d) return;
-    const desc = prompt("Descrição:", d.desc || "");
+    const desc = await uiPrompt("Descrição:", d.desc || "");
     if (desc === null) return;
-    const valor = parseBRL(prompt("Valor (R$):", String(d.valor).replace(".", ",")) || "0");
+    const valor = parseBRL(await uiPrompt("Valor (R$):", String(d.valor).replace(".", ",")) || "0");
     if (!valor) return;
     d.desc = desc.trim(); d.valor = valor;
     syncValeMov(emp, d);
@@ -705,8 +727,8 @@ function openToolForm(bill) {
       renderAll();
       scheduleSave();
     });
-    if (isEdit) document.getElementById("tfDelete").addEventListener("click", () => {
-      if (!confirm("Excluir esta ferramenta? Essa ação não pode ser desfeita.")) return;
+    if (isEdit) document.getElementById("tfDelete").addEventListener("click", async () => {
+      if (!await uiConfirm("Excluir esta ferramenta? Essa ação não pode ser desfeita.")) return;
       state.bills = state.bills.filter(x => x.id !== bill.id);
       closeFormModal();
       renderFilterChips();
@@ -769,8 +791,8 @@ function openInstallmentForm(bill) {
       renderAll();
       scheduleSave();
     });
-    if (isEdit) document.getElementById("ifDelete").addEventListener("click", () => {
-      if (!confirm("Excluir este parcelamento? Essa ação não pode ser desfeita.")) return;
+    if (isEdit) document.getElementById("ifDelete").addEventListener("click", async () => {
+      if (!await uiConfirm("Excluir este parcelamento? Essa ação não pode ser desfeita.")) return;
       state.bills = state.bills.filter(x => x.id !== bill.id);
       closeFormModal();
       renderFilterChips();
@@ -829,8 +851,8 @@ function openEmployeeForm(emp) {
       renderAll();
       scheduleSave();
     });
-    if (isEdit) document.getElementById("efDelete").addEventListener("click", () => {
-      if (!confirm(`Excluir ${emp.nome}? Isso também remove a conta de pagamento dele. Essa ação não pode ser desfeita.`)) return;
+    if (isEdit) document.getElementById("efDelete").addEventListener("click", async () => {
+      if (!await uiConfirm(`Excluir ${emp.nome}? Isso também remove a conta de pagamento dele. Essa ação não pode ser desfeita.`)) return;
       state.employees = state.employees.filter(x => x.id !== emp.id);
       state.bills = state.bills.filter(b => b.id !== emp.billId);
       closeFormModal();
@@ -944,8 +966,8 @@ function openBillModal(id) {
     document.getElementById("mfSave").addEventListener("click", saveBillModal);
     if (!isPayroll) document.getElementById("mfDelete").addEventListener("click", deleteBillModal);
     const undo = document.getElementById("mfUndo");
-    if (undo) undo.addEventListener("click", () => {
-      if (!confirm("Desfazer o último pagamento? O lançamento sai do caixa e a conta volta pro vencimento anterior.")) return;
+    if (undo) undo.addEventListener("click", async () => {
+      if (!await uiConfirm("Desfazer o último pagamento? O lançamento sai do caixa e a conta volta pro vencimento anterior.")) return;
       desfazerPagamento(b);
       closeBillModal(); renderAll(); scheduleSave();
     });
@@ -992,8 +1014,8 @@ function saveBillModal() {
   renderAll();
   scheduleSave();
 }
-function deleteBillModal() {
-  if (!confirm("Excluir esta conta? Os pagamentos já lançados no caixa continuam lá. Essa ação não pode ser desfeita.")) return;
+async function deleteBillModal() {
+  if (!await uiConfirm("Excluir esta conta? Os pagamentos já lançados no caixa continuam lá. Essa ação não pode ser desfeita.")) return;
   const idx = state.bills.findIndex(x => x.id === currentModalId);
   if (idx > -1) state.bills.splice(idx, 1);
   closeBillModal();
@@ -1043,7 +1065,11 @@ document.addEventListener("click", e => {
 });
 document.getElementById("modalClose").addEventListener("click", closeBillModal);
 document.getElementById("billModalOverlay").addEventListener("click", e => { if (e.target.id === "billModalOverlay") closeBillModal(); });
-document.addEventListener("keydown", e => { if (e.key === "Escape") { closeBillModal(); closeFormModal(); } });
+document.addEventListener("keydown", e => {
+  if (e.key !== "Escape") return;
+  if (document.getElementById("dialogOverlay").classList.contains("open")) { document.getElementById("dialogCancel").click(); return; }
+  closeBillModal(); closeFormModal();
+});
 
 // ---------------- Receber: modal genérico que lança a entrada no caixa ----------------
 function openReceberModal({ titulo, valor, data, nota, onConfirm }) {
@@ -1146,8 +1172,8 @@ function openClientForm(c) {
   $("cfInicio").addEventListener("change", recalc);
   $("cfDia").addEventListener("change", recalc);
   $("cfCancel").addEventListener("click", closeFormModal);
-  if (isEdit) $("cfDelete").addEventListener("click", () => {
-    if (!confirm(`Excluir ${c.nome}? Os recebimentos já lançados no caixa continuam lá.`)) return;
+  if (isEdit) $("cfDelete").addEventListener("click", async () => {
+    if (!await uiConfirm(`Excluir ${c.nome}? Os recebimentos já lançados no caixa continuam lá.`)) return;
     state.clients = state.clients.filter(x => x.id !== c.id);
     closeFormModal(); renderAll(); scheduleSave();
   });
@@ -1167,7 +1193,7 @@ document.getElementById("btnNewClient").addEventListener("click", () => {
   if (!requireAdmin()) return;
   openClientForm(null);
 });
-document.getElementById("clientsBody").addEventListener("click", e => {
+document.getElementById("clientsBody").addEventListener("click", async e => {
   const tr = e.target.closest("tr[data-id]");
   if (!tr) return;
   const c = state.clients.find(x => x.id === tr.dataset.id);
@@ -1175,12 +1201,12 @@ document.getElementById("clientsBody").addEventListener("click", e => {
   if (e.target.closest('[data-action="client-edit"]')) { if (requireAdmin()) openClientForm(c); return; }
   if (!e.target.closest('[data-action="client-del"]')) return;
   if (!requireAdmin()) return;
-  if (!confirm(`Excluir ${c.nome}? Os recebimentos já lançados no caixa continuam lá.`)) return;
+  if (!await uiConfirm(`Excluir ${c.nome}? Os recebimentos já lançados no caixa continuam lá.`)) return;
   state.clients = state.clients.filter(x => x.id !== c.id);
   renderAll();
   scheduleSave();
 });
-document.getElementById("clientsBody").addEventListener("change", e => {
+document.getElementById("clientsBody").addEventListener("change", async e => {
   const id = e.target.closest("tr") ? e.target.closest("tr").dataset.id : null;
   const c = state.clients.find(x => x.id === id);
   if (!c) return;
@@ -1201,7 +1227,7 @@ document.getElementById("clientsBody").addEventListener("change", e => {
         onConfirm: dados => receberCliente(c, key, dados),
       });
     } else {
-      if (!confirm(`Desmarcar o recebimento de ${c.nome}? O lançamento sai do caixa.`)) { renderClients(); return; }
+      if (!await uiConfirm(`Desmarcar o recebimento de ${c.nome}? O lançamento sai do caixa.`)) { renderClients(); return; }
       desfazerRecebimentoCliente(c, CUR_KEY);
       renderAll();
       scheduleSave();
@@ -1258,7 +1284,7 @@ document.getElementById("freelasBody").addEventListener("click", e => {
   const f = tr && state.freelas.find(x => x.id === tr.dataset.freelaId);
   if (f) openFreelaForm(f);
 });
-document.getElementById("freelaRecebBody").addEventListener("change", e => {
+document.getElementById("freelaRecebBody").addEventListener("change", async e => {
   if (e.target.dataset.action !== "freela-pago") return;
   if (!requireAdmin()) { renderFreelas(); return; }
   const tr = e.target.closest("tr");
@@ -1277,7 +1303,7 @@ document.getElementById("freelaRecebBody").addEventListener("change", e => {
     });
     return;
   }
-  if (!confirm("Desmarcar este recebimento? O lançamento sai do caixa.")) { renderFreelas(); return; }
+  if (!await uiConfirm("Desmarcar este recebimento? O lançamento sai do caixa.")) { renderFreelas(); return; }
   if (p.movId) removeMovById(p.movId);
   p.pago = false; delete p.pagoEm; delete p.movId;
   renderAll();
@@ -1428,9 +1454,9 @@ function openFreelaForm(f) {
       renderAll();
       scheduleSave();
     });
-    if (isEdit) $("ffDelete").addEventListener("click", () => {
+    if (isEdit) $("ffDelete").addEventListener("click", async () => {
       const recebidas = (f.parcelas || []).filter(p => p.movId);
-      if (!confirm("Excluir este freela?" + (recebidas.length ? " Os recebimentos dele lançados no caixa também saem." : "") + " Essa ação não pode ser desfeita.")) return;
+      if (!await uiConfirm("Excluir este freela?" + (recebidas.length ? " Os recebimentos dele lançados no caixa também saem." : "") + " Essa ação não pode ser desfeita.")) return;
       recebidas.forEach(p => removeMovById(p.movId));
       state.freelas = state.freelas.filter(x => x.id !== f.id);
       closeFormModal();
@@ -1598,12 +1624,12 @@ function openMovForm(m, tipo) {
     $("mvCat").value = "Cliente mensal";
   });
   $("mvCancel").addEventListener("click", closeFormModal);
-  if (isEdit) $("mvDelete").addEventListener("click", () => {
-    if (!confirm("Excluir este lançamento? O saldo da conta é recalculado.")) return;
+  if (isEdit) $("mvDelete").addEventListener("click", async () => {
+    if (!await uiConfirm("Excluir este lançamento? O saldo da conta é recalculado.")) return;
     deleteMov(m);
     closeFormModal(); renderAll(); scheduleSave();
   });
-  $("mvSave").addEventListener("click", () => {
+  $("mvSave").addEventListener("click", async () => {
     const valor = parseBRL($("mvValor").value);
     if (!valor) { $("mvValor").focus(); return; }
     const data = $("mvData").value || TODAY_ISO;
@@ -1612,7 +1638,7 @@ function openMovForm(m, tipo) {
     const cliente = !isEdit && $("mvCliente") ? state.clients.find(x => x.id === $("mvCliente").value) : null;
     if (cliente) {
       const key = data.slice(0, 7);
-      if (clienteRecebimento(cliente, key) && !confirm(`${cliente.nome} já está como recebido em ${monthLabel(key)}. Lançar mesmo assim (substitui o anterior)?`)) return;
+      if (clienteRecebimento(cliente, key) && !await uiConfirm(`${cliente.nome} já está como recebido em ${monthLabel(key)}. Lançar mesmo assim (substitui o anterior)?`)) return;
       desfazerRecebimentoCliente(cliente, key);
       const mov = receberCliente(cliente, key, { valor, data, contaId: dados.contaId });
       mov.desc = dados.desc; mov.cat = dados.cat || mov.cat;
@@ -1701,8 +1727,8 @@ function openContaForm(c) {
   sync();
   $("ctTipo").addEventListener("change", sync);
   $("ctCancel").addEventListener("click", closeFormModal);
-  if ($("ctDelete")) $("ctDelete").addEventListener("click", () => {
-    if (!confirm(`Excluir ${c.nome}?`)) return;
+  if ($("ctDelete")) $("ctDelete").addEventListener("click", async () => {
+    if (!await uiConfirm(`Excluir ${c.nome}?`)) return;
     state.contas = state.contas.filter(x => x.id !== c.id);
     closeFormModal(); renderAll(); scheduleSave();
   });
@@ -1737,12 +1763,12 @@ function openPagarFatura(cartao) {
   });
   document.getElementById("formModalOverlay").classList.add("open");
 }
-function ajustarSaldo(c) {
+async function ajustarSaldo(c) {
   const atual = saldoConta(c);
-  const val = prompt(`Quanto o app do ${c.nome} mostra de saldo agora? (R$)\nSaldo calculado aqui: ${brl(atual)}`, String(atual.toFixed(2)).replace(".", ","));
+  const val = await uiPrompt(`Quanto o app do ${c.nome} mostra de saldo agora? (R$)\nSaldo calculado aqui: ${brl(atual)}`, String(atual.toFixed(2)).replace(".", ","));
   if (val === null) return;
   const diff = Math.round((parseBRL(val) - atual) * 100) / 100;
-  if (!diff) { alert("Bateu certinho, nada pra ajustar."); return; }
+  if (!diff) { uiAlert("Bateu certinho, nada pra ajustar."); return; }
   addMov({ tipo: diff > 0 ? "entrada" : "saida", valor: Math.abs(diff), data: TODAY_ISO, desc: "Ajuste de saldo (conferência com o banco)", contaId: c.id, cat: "Ajuste de saldo", origem: { tipo: "ajuste" } });
   renderAll(); scheduleSave();
 }

@@ -151,6 +151,7 @@
 
   .modal-overlay{ position:fixed; inset:0; background:rgba(11,32,40,.6); display:none; align-items:center; justify-content:center; padding:20px; z-index:80; }
   .modal-overlay.open{ display:flex; }
+  .dialog-overlay{ z-index:90; }
   .modal{ background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); width:100%; max-width:420px; max-height:88vh; overflow-y:auto; }
   .modal-head{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom:1px solid var(--border); }
   .modal-head h3{ font-size:16px; }
@@ -676,6 +677,13 @@
     <div class="modal-head"><h3 id="formModalTitle">Novo</h3><button class="modal-close" id="formModalClose" type="button" aria-label="Fechar">✕</button></div>
     <div class="modal-body" id="formModalBody"></div>
     <div class="modal-foot" id="formModalFoot"></div>
+  </div>
+</div>
+
+<div class="modal-overlay dialog-overlay" id="dialogOverlay">
+  <div class="modal" style="max-width:380px;" role="alertdialog" aria-labelledby="dialogMsg">
+    <div class="modal-body"><p id="dialogMsg" style="margin:0; line-height:1.5; white-space:pre-line;"></p><div class="modal-field"><input type="text" id="dialogInput" hidden></div></div>
+    <div class="modal-foot" style="justify-content:flex-end;"><button class="btn" id="dialogCancel" type="button">Cancelar</button><button class="btn btn-accent" id="dialogOk" type="button">OK</button></div>
   </div>
 </div>
 
