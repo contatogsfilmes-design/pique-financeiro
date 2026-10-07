@@ -70,8 +70,17 @@ Depois de logado como admin, vá em **Equipe & Acesso → Convidar membro**, col
 empresas/pique/
   membros/{uid}        — {email, nome, role, fotoURL}
   convites/{token}      — {emailAlvo, role, criadoPor}
-  estado/dados           — documento único: {bills, tags, clients, employees, notas, caixaAtual}
+  estado/dados           — documento único: {bills, tags, clients, employees, notas, freelas, contas, movs, caixaAtual}
 ```
+
+### Controle de caixa
+
+- `contas` — conta bancária (Inter, com `saldoInicial`) e cartão de crédito (`limite`, `vencimento`).
+- `movs` — cada entrada/saída: `{tipo, valor, data, desc, contaId, tagId|cat, origem}`. O saldo da conta é sempre calculado: saldo inicial + entradas − saídas. `caixaAtual` é só uma cópia desse cálculo.
+- Lançamentos automáticos: recebimento de cliente (`clients[].recebimentos["AAAA-MM"]`), parcela de freela recebida (`parcelas[].movId`), conta paga (`bills[].ultimoPagamento`, que guarda o necessário pra desfazer) e vale de funcionário (`despesas[].movId`). Excluir o lançamento no extrato desfaz a marcação de origem.
+- Compra no cartão conta como gasto na data da compra; "Pagar fatura" tira o dinheiro da conta com `pagaFatura` e não conta o gasto de novo.
+- Cliente novo: `primeiroVenc` = mês seguinte ao da entrada (`inicio`), no dia de pagamento. Ele só entra na receita/projeção a partir desse mês.
+- Funcionário: `base` (permanente) + `ajusteMes` (só no mês) + extras − vales (adiantamentos, que já saíram do caixa). Ao pagar, os vales/extras do mês vão pro `historico` e a conta anda pro mês seguinte.
 
 Tudo (contas, clientes, funcionários, tags, notas fiscais) vive num único documento `estado/dados`, do mesmo jeito que foi feito no QG Finanças — simples e dentro do limite gratuito do Firestore (1MB por documento).
 

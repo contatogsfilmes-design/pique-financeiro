@@ -261,7 +261,8 @@
   .emp-total b{ font-family:"Space Mono"; font-size:15px; }
   .add-exp-row{ display:flex; gap:6px; margin-top:2px; }
   .add-exp-row input, .add-exp-row select{ font-family:inherit; font-size:12px; border:1px solid var(--border); border-radius:7px; padding:6px 8px; background:var(--bg); color:var(--ink); }
-  .add-exp-row select{ flex:0 0 84px; }
+  .add-exp-row{ flex-wrap:wrap; }
+  .add-exp-row select{ flex:1 1 100%; }
   .add-exp-row input[name="desc"]{ flex:1; min-width:0; }
   .add-exp-row input[name="valor"]{ width:76px; }
   .add-emp-card{ border:1.5px dashed var(--border); border-radius:var(--radius); display:flex; align-items:center; justify-content:center; min-height:150px; background:transparent; color:var(--ink-faint); font-weight:600; font-size:13.5px; cursor:pointer; gap:8px; }
@@ -275,8 +276,6 @@
   .pay-toggle input{ display:none; }
   .pay-dot{ width:14px; height:14px; border-radius:50%; border:2px solid var(--zero); flex:none; }
   .pay-toggle input:checked + .pay-dot{ background:var(--positive); border-color:var(--positive); }
-  .new-client-form{ display:none; grid-template-columns:1.4fr 1fr 1fr 1fr auto; gap:10px; align-items:end; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:16px; }
-  .new-client-form.open{ display:grid; }
   .freela-month{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
   .freela-month .cal-title{ text-transform:capitalize; }
   .freela-sub{ display:block; font-size:11.5px; color:var(--ink-faint); margin-top:2px; }
@@ -350,6 +349,29 @@
     .board{ grid-template-columns:repeat(2,1fr); }
   }
 
+  .conta-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:14px; margin-bottom:22px; }
+  .conta-card{ background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--positive); border-radius:var(--radius); box-shadow:var(--shadow); padding:16px 18px; display:flex; flex-direction:column; gap:4px; }
+  .conta-card.credito{ border-left-color:var(--accent); }
+  .conta-head{ display:flex; align-items:center; justify-content:space-between; }
+  .conta-head .btn-ghost{ padding:2px 6px; }
+  .conta-nome{ font-weight:600; font-size:14px; }
+  .conta-card .stat-value{ margin-top:4px; }
+  .conta-actions{ margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  .caixa-controls{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .caixa-controls select{ font-family:inherit; font-size:12.5px; border:1px solid var(--border); border-radius:9px; padding:7px 10px; background:var(--surface); color:var(--ink); }
+  .chip b.pos{ color:var(--positive); } .chip b.neg{ color:var(--negative); }
+  .emp-sum{ display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:var(--ink-soft); }
+  .emp-sum div{ display:flex; justify-content:space-between; }
+  .emp-sum b{ font-family:"Space Mono"; font-weight:600; color:var(--ink); }
+  .emp-sum b.neg{ color:var(--negative); }
+  .emp-ajuste-btn{ align-self:flex-start; }
+  .exp-list li.exp-empty{ cursor:default; color:var(--ink-faint); }
+  .exp-list li.exp-empty:hover{ background:none; }
+  .link-btn{ background:none; border:none; padding:0; color:var(--accent); font:inherit; font-weight:600; cursor:pointer; text-decoration:underline; }
+  .check-line{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); cursor:pointer; }
+  .client-name{ cursor:pointer; font-weight:600; }
+  .client-name:hover{ color:var(--accent); }
+
   .read-only .admin-only{ display:none !important; }
 </style>
 </head>
@@ -377,6 +399,7 @@
     </div>
     <nav class="nav">
       <button class="nav-item active" data-tab="dashboard"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="2.5" width="6.5" height="8" rx="1.4"/><rect x="11" y="2.5" width="6.5" height="5" rx="1.4"/><rect x="11" y="9.5" width="6.5" height="8" rx="1.4"/><rect x="2.5" y="12.5" width="6.5" height="5" rx="1.4"/></svg>Dashboard</button>
+      <button class="nav-item" data-tab="caixa"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="16" height="11" rx="2"/><path d="M2 8.5h16"/><path d="M5.5 12.5h3"/><path d="M6 5V3.5h8V5"/></svg>Caixa</button>
       <button class="nav-item" data-tab="contas"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2.5" y="3.5" width="15" height="14" rx="2"/><path d="M2.5 8h15M6.5 2v3M13.5 2v3"/><path d="M6.5 12l1.8 1.8L10.5 11" /></svg>Contas a Pagar</button>
       <button class="nav-item" data-tab="custos"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 6.5L10 2.5l7.5 4v7L10 17.5l-7.5-4v-7Z"/><path d="M2.5 6.5L10 10.5l7.5-4M10 10.5v7"/></svg>Custos Mensais</button>
       <button class="nav-item" data-tab="clientes"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="6.5" r="3"/><path d="M1.8 17c.5-3.2 2.7-5 5.2-5s4.7 1.8 5.2 5"/><circle cx="14.5" cy="7.5" r="2.3"/><path d="M13 17c.3-2.5 1.8-4 3.4-4.3"/></svg>Clientes</button>
@@ -402,19 +425,19 @@
     <!-- ================= DASHBOARD ================= -->
     <section id="tab-dashboard" class="tab-panel active">
       <div class="stat-grid">
-        <div class="stat-tile editable" id="tileCaixa" title="Clique pra atualizar o saldo em conta">
-          <div class="stat-label">Caixa atual</div><div class="stat-value num" id="statCaixa">R$ 0,00</div><div class="stat-sub">Clique pra atualizar · saldo em conta</div>
+        <div class="stat-tile editable" id="tileCaixa" title="Abrir o extrato do caixa">
+          <div class="stat-label">Caixa atual</div><div class="stat-value num" id="statCaixa">R$ 0,00</div><div class="stat-sub" id="statCaixaSub">Saldo da conta Inter</div>
         </div>
         <div class="stat-tile"><div class="stat-label">A receber este mês</div><div class="stat-value num pos" id="statReceber">R$ 0,00</div><div class="stat-sub" id="statReceberSub">—</div></div>
         <div class="stat-tile"><div class="stat-label">A pagar este mês</div><div class="stat-value num neg" id="statPagar">R$ 0,00</div><div class="stat-sub" id="statPagarSub">—</div></div>
-        <div class="stat-tile"><div class="stat-label">Saldo projetado do mês</div><div class="stat-value num neg" id="statSaldo">R$ 0,00</div><div class="stat-sub">Receita menos contas em aberto</div></div>
+        <div class="stat-tile"><div class="stat-label">Caixa previsto no fim do mês</div><div class="stat-value num neg" id="statSaldo">R$ 0,00</div><div class="stat-sub">Caixa + a receber − a pagar</div></div>
       </div>
 
       <div class="panel-row">
         <div class="card">
-          <div class="card-head"><div><h2>Receita × Custos deste mês</h2><p>Clientes ativos + freelances do mês contra contas em aberto</p></div></div>
+          <div class="card-head"><div><h2>Receita × Custos deste mês</h2><p>O que já entrou/saiu + o que ainda falta no mês</p></div></div>
           <div class="chart-wrap" id="chart"></div>
-          <div class="legend"><span><i style="background:var(--positive)"></i>Receita ativa</span><span><i style="background:var(--negative)"></i>Custos em aberto</span></div>
+          <div class="legend"><span><i style="background:var(--positive)"></i>Receitas do mês</span><span><i style="background:var(--negative)"></i>Custos do mês</span></div>
         </div>
         <div class="card">
           <div class="card-head"><div><h2>Avisos</h2><p>O que precisa de atenção agora</p></div></div>
@@ -431,11 +454,38 @@
       </div>
 
       <div class="card">
-        <div class="card-head"><div><h2>Projeção de lucro bruto</h2><p>Clientes ativos + freelances previstos pro mês, menos custos mensais recorrentes</p></div></div>
+        <div class="card-head"><div><h2>Projeção de lucro e caixa</h2><p>Clientes ativos que pagam em cada mês (cliente novo só a partir do mês seguinte) + freelances ainda não recebidos, menos as contas previstas. O caixa considera a fatura do cartão em aberto paga já neste mês.</p></div></div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Mês</th><th>Clientes fixos</th><th>Freelances</th><th>Custos previstos</th><th>Lucro bruto estimado</th></tr></thead>
+            <thead><tr><th>Mês</th><th>Clientes mensais</th><th>Freelances</th><th>Outras entradas</th><th>Custos</th><th>Lucro estimado</th><th>Caixa no fim do mês</th></tr></thead>
             <tbody id="projBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CAIXA ================= -->
+    <section id="tab-caixa" class="tab-panel">
+      <div class="conta-grid" id="contaGrid"></div>
+      <div class="freela-month">
+        <div class="cal-nav"><button id="caixaPrev" aria-label="Mês anterior" type="button">‹</button><span class="cal-title" id="caixaMonthTitle"></span><button id="caixaNext" aria-label="Próximo mês" type="button">›</button></div>
+        <div class="caixa-controls">
+          <select id="caixaFiltro" aria-label="Filtrar por conta"></select>
+          <button class="btn admin-only" id="btnNovaEntrada" type="button" style="color:var(--positive);">+ Entrada</button>
+          <button class="btn btn-accent admin-only" id="btnNovaSaida" type="button">+ Saída</button>
+        </div>
+      </div>
+      <div class="chips" style="margin-bottom:16px;">
+        <div class="chip">Entradas do mês <b id="chipCxEntradas">R$ 0,00</b></div>
+        <div class="chip">Saídas do mês <b id="chipCxSaidas">R$ 0,00</b></div>
+        <div class="chip">Resultado <b id="chipCxResultado">R$ 0,00</b></div>
+      </div>
+      <p class="stat-sub" style="margin-top:-6px; margin-bottom:12px;">Recebimentos de clientes e freelas, contas pagas e vales entram aqui sozinhos. Clique num lançamento pra editar ou excluir.</p>
+      <div class="card" style="padding:0;">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th style="text-align:right;">Valor</th></tr></thead>
+            <tbody id="extratoBody"></tbody>
           </table>
         </div>
       </div>
@@ -447,6 +497,7 @@
         <h2>Quando pagar cada conta</h2>
         <div class="section-controls">
           <div class="filter-chips" id="billFilters"></div>
+          <button class="btn btn-accent btn-sm admin-only" id="btnNewBill" type="button">+ Nova conta</button>
           <div class="seg" id="billView">
             <button class="active" data-view="calendario">Calendário</button>
             <button data-view="quadro">Quadro</button>
@@ -518,25 +569,16 @@
         <h2>Clientes</h2>
         <div class="chips">
           <div class="chip"><span id="chipAtivos">0</span> clientes ativos</div>
-          <div class="chip">Receita mensal ativa <b id="chipReceita">R$ 0,00</b></div>
+          <div class="chip">Mensalidades deste mês <b id="chipReceita">R$ 0,00</b></div>
+          <div class="chip">Recebido este mês <b id="chipRecebidoMes">R$ 0,00</b></div>
           <button class="btn btn-accent admin-only" id="btnNewClient">+ Novo cliente</button>
         </div>
       </div>
 
-      <form class="new-client-form admin-only" id="newClientForm">
-        <div class="field"><label>Nome do cliente</label><input type="text" name="nome" placeholder="Ex: Studio X" required></div>
-        <div class="field"><label>Valor mensal</label><input type="text" name="valor" placeholder="R$ 0,00" required></div>
-        <div class="field"><label>Dia de pagamento</label><input type="text" name="dia" placeholder="Ex: 10" required></div>
-        <div class="field"><label>Status</label>
-          <select name="status"><option value="ativo">Ativo</option><option value="pausado">Pausado</option><option value="novo">Não gravou ainda</option></select>
-        </div>
-        <button type="submit" class="btn btn-accent">Adicionar</button>
-      </form>
-
       <div class="card" style="padding:0;">
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Cliente</th><th>Valor mensal</th><th>Dia pgto</th><th>Status</th><th>Pago este mês</th><th></th></tr></thead>
+            <thead><tr><th>Cliente</th><th>Valor mensal</th><th>Dia pgto</th><th>Status</th><th>Recebido este mês</th><th></th></tr></thead>
             <tbody id="clientsBody"></tbody>
           </table>
         </div>
