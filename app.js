@@ -114,7 +114,6 @@ function payPillMeta(b) {
   return bk === "atrasado" ? { cls: "atrasado", text: "Atrasado" } : { cls: "pendente", text: "Pendente" };
 }
 function displayTitle(b) { return (b.kind === "Parcelado" && b.parcelas) ? `${b.title} · ${b.parcelaAtual}/${b.parcelas}` : b.title; }
-function getActiveRevenue() { return state.clients.filter(c => c.status === "ativo").reduce((s, c) => s + Number(c.valor || 0), 0); }
 function monthKeyOf(y, m) { return `${y}-${String(m + 1).padStart(2, "0")}`; }
 function addMonthsISO(iso, k) {
   const [y, m, d] = iso.split("-").map(Number);
@@ -197,6 +196,21 @@ function primeiroVencPadrao(inicioISO, dia) { return diaNoMes(addMonthsISO(inici
 function clientePagaNoMes(c, key) { return c.status === "ativo" && (!c.primeiroVenc || c.primeiroVenc.slice(0, 7) <= key); }
 function clienteRecebimento(c, key) { return c.recebimentos ? c.recebimentos[key] : null; }
 function clienteVencNoMes(c, key) { return (c.primeiroVenc && c.primeiroVenc.slice(0, 7) === key) ? c.primeiroVenc : diaNoMes(key, c.dia); }
+// Ciclo do cliente: depois de pagar, fica "em dia" até perto do próximo
+// vencimento; a partir de DIAS_AVISO_CLIENTE dias antes volta a ficar pendente.
+const DIAS_AVISO_CLIENTE = 5;
+const INICIO_CONTROLE = "2026-10"; // antes disso não havia controle por mês, então não cobra atrasado
+function clienteSituacao(c) {
+  // Mês anterior em aberto continua aparecendo como atrasado até ser pago.
+  const prevKey = addMonthsISO(CUR_KEY + "-01", -1).slice(0, 7);
+  if (prevKey >= INICIO_CONTROLE && clientePagaNoMes(c, prevKey) && !clienteRecebimento(c, prevKey)) return { st: "atrasado", venc: clienteVencNoMes(c, prevKey), key: prevKey };
+  const rec = clienteRecebimento(c, CUR_KEY);
+  const venc = clienteVencNoMes(c, CUR_KEY);
+  if (rec) return { st: "pago", rec, prox: clienteVencNoMes(c, addMonthsISO(CUR_KEY + "-01", 1).slice(0, 7)) };
+  if (venc < TODAY_ISO) return { st: "atrasado", venc, key: CUR_KEY };
+  const limiteAviso = isoOf(new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + DIAS_AVISO_CLIENTE));
+  return { st: venc <= limiteAviso ? "pendente" : "emdia", venc, key: CUR_KEY };
+}
 function getActiveRevenue() { return state.clients.filter(c => clientePagaNoMes(c, CUR_KEY)).reduce((s, c) => s + Number(c.valor || 0), 0); }
 
 // ---------------- Projeção mês a mês ----------------
@@ -216,7 +230,11 @@ function contaPendenteNoMes(b, key) {
 }
 function aPagarNoMes(key) { return state.bills.reduce((s, b) => s + contaPendenteNoMes(b, key), 0); }
 // Recebimentos ainda não feitos no mês key (no mês atual inclui os atrasados).
-function clientesPendentesNoMes(key) { return state.clients.filter(c => clientePagaNoMes(c, key) && !clienteRecebimento(c, key)); }
+function clientesPendentesNoMes(key) {
+  const out = state.clients.filter(c => clientePagaNoMes(c, key) && !clienteRecebimento(c, key));
+  if (key === CUR_KEY) state.clients.forEach(c => { const s = c.status === "ativo" && clienteSituacao(c); if (s && s.key && s.key !== CUR_KEY) out.push(c); });
+  return out;
+}
 function freelaParcelasPendentes(key) {
   const out = [];
   (state.freelas || []).forEach(f => (f.parcelas || []).forEach((p, idx) => {
@@ -284,7 +302,14 @@ function migrateState() {
   }
   state.clients.forEach(c => {
     // "Pago este mês" antigo era só um sim/não sem mês: vale pro mês atual, sem lançamento no caixa.
-    if (!c.recebimentos) { c.recebimentos = {}; if (c.pago) c.recebimentos[CUR_KEY] = { legado: true, valor: Number(c.valor || 0), data: TODAY_ISO }; }
+    // O pagamento vale pro último vencimento que já passou (ex: dia 17, hoje 07/10 → o de 17/09).
+    if (!c.recebimentos) {
+      c.recebimentos = {};
+      if (c.pago) {
+        const key = diaNoMes(CUR_KEY, c.dia) <= TODAY_ISO ? CUR_KEY : addMonthsISO(CUR_KEY + "-01", -1).slice(0, 7);
+        c.recebimentos[key] = { legado: true, valor: Number(c.valor || 0), data: TODAY_ISO };
+      }
+    }
     delete c.pago;
   });
   // Antes, conta mensal paga ficava "Pago" pra sempre. Agora ela anda pro
@@ -1055,17 +1080,21 @@ function desfazerRecebimentoCliente(c, key) {
 }
 function clientRowHTML(c) {
   const rec = clienteRecebimento(c, CUR_KEY);
+  const sit0 = c.status === "ativo" ? clienteSituacao(c) : null;
   let payCell;
-  if (rec) {
-    payCell = `<label class="pay-toggle"><input type="checkbox" data-action="client-pago" checked><span class="pay-dot"></span>Recebido ${fmtDate(rec.data)}</label>`;
+  if (rec && !(sit0 && sit0.key && sit0.key !== CUR_KEY)) {
+    payCell = `<label class="pay-toggle"><input type="checkbox" data-action="client-pago" checked><span class="pay-dot"></span>Pago ${fmtDate(rec.data)} · próximo ${fmtDate(clienteSituacao(c).prox)}</label>`;
   } else if (c.status !== "ativo") {
     payCell = "—";
   } else if (!clientePagaNoMes(c, CUR_KEY)) {
     payCell = `<span class="badge pausado" title="Entrou agora: o primeiro pagamento é no mês seguinte">1º pgto ${fmtDateFull(c.primeiroVenc)}</span>`;
   } else {
-    const venc = clienteVencNoMes(c, CUR_KEY);
-    const atrasado = venc < TODAY_ISO;
-    payCell = `<label class="pay-toggle"><input type="checkbox" data-action="client-pago"><span class="pay-dot"></span><span class="${atrasado ? "neg" : ""}">${atrasado ? "Atrasado · venceu " : "Vence "}${fmtDate(venc)}</span></label>`;
+    const sit = clienteSituacao(c);
+    const txt = sit.st === "atrasado" ? `Atrasado · venceu ${fmtDate(sit.venc)}`
+      : sit.st === "pendente" ? `Pendente · vence ${fmtDate(sit.venc)}`
+      : `Em dia · próximo ${fmtDate(sit.venc)}`;
+    const cls = sit.st === "atrasado" ? "neg" : sit.st === "pendente" ? "warn-txt" : "pos";
+    payCell = `<label class="pay-toggle" title="Marque quando o cliente pagar: o valor entra no caixa"><input type="checkbox" data-action="client-pago"><span class="pay-dot"></span><span class="${cls}">${txt}</span></label>`;
   }
   return `<tr data-id="${c.id}">
     <td class="client-name" data-action="client-edit" title="Editar cliente">${escapeHtml(c.nome)}${c.inicio ? `<span class="freela-sub">desde ${fmtDateFull(c.inicio)}</span>` : ""}</td>
@@ -1164,10 +1193,12 @@ document.getElementById("clientsBody").addEventListener("change", e => {
   if (e.target.dataset.action === "client-pago") {
     if (!requireAdmin()) { renderClients(); return; }
     if (e.target.checked) {
+      const sit = clienteSituacao(c);
+      const key = sit.key || CUR_KEY;
       openReceberModal({
         titulo: "Recebimento · " + c.nome, valor: c.valor, data: TODAY_ISO,
-        nota: `Mensalidade de ${monthLabel(CUR_KEY)}. O valor entra no saldo da conta escolhida.`,
-        onConfirm: dados => receberCliente(c, CUR_KEY, dados),
+        nota: `Mensalidade de ${monthLabel(key)} (vencimento ${fmtDateFull(clienteVencNoMes(c, key))}). O valor entra no saldo da conta escolhida.`,
+        onConfirm: dados => receberCliente(c, key, dados),
       });
     } else {
       if (!confirm(`Desmarcar o recebimento de ${c.nome}? O lançamento sai do caixa.`)) { renderClients(); return; }
@@ -1801,10 +1832,9 @@ function renderAvisos() {
     if (c.status === "novo") { items.push({ c: "var(--zero)", t: `${escapeHtml(c.nome)} está cadastrado mas ainda não gravou nada` }); return; }
     if (c.status !== "ativo") return;
     if (!clientePagaNoMes(c, CUR_KEY)) { items.push({ c: "var(--zero)", t: `${escapeHtml(c.nome)} entrou agora — 1º pagamento em ${fmtDateFull(c.primeiroVenc)}` }); return; }
-    if (clienteRecebimento(c, CUR_KEY)) return;
-    const venc = clienteVencNoMes(c, CUR_KEY);
-    if (venc < TODAY_ISO) items.push({ c: "var(--negative)", t: `${escapeHtml(c.nome)} não pagou — venceu ${fmtDate(venc)} (${brl(c.valor)})` });
-    else items.push({ c: "var(--accent)", t: `${escapeHtml(c.nome)} paga dia ${fmtDate(venc)} — ${brl(c.valor)}` });
+    const sit = clienteSituacao(c);
+    if (sit.st === "atrasado") items.push({ c: "var(--negative)", t: `${escapeHtml(c.nome)} não pagou — venceu ${fmtDate(sit.venc)} (${brl(c.valor)})` });
+    else if (sit.st === "pendente") items.push({ c: "var(--accent)", t: `${escapeHtml(c.nome)} paga dia ${fmtDate(sit.venc)} — ${brl(c.valor)}` });
   });
   (state.freelas || []).forEach(f => (f.parcelas || []).forEach((p, i) => {
     if (p.pago || !p.venc) return;
