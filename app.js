@@ -1099,6 +1099,13 @@ function receberCliente(c, key, { valor, data, contaId }) {
   c.recebimentos[key] = { movId: mov.id, valor, data };
   return mov;
 }
+// Cliente que pagou o mês atual antes do 1º vencimento previsto: o ciclo
+// passa a começar neste mês e o recebimento entra no caixa.
+function receberMesAtual(c, dados) {
+  if (c.primeiroVenc && c.primeiroVenc.slice(0, 7) > CUR_KEY) c.primeiroVenc = diaNoMes(CUR_KEY, c.dia);
+  if (c.status !== "ativo") c.status = "ativo";
+  return receberCliente(c, CUR_KEY, dados);
+}
 function desfazerRecebimentoCliente(c, key) {
   const r = clienteRecebimento(c, key);
   if (r && r.movId) removeMovById(r.movId);
@@ -1113,7 +1120,7 @@ function clientRowHTML(c) {
   } else if (c.status !== "ativo") {
     payCell = "—";
   } else if (!clientePagaNoMes(c, CUR_KEY)) {
-    payCell = `<span class="badge pausado" title="Entrou agora: o primeiro pagamento é no mês seguinte">1º pgto ${fmtDateFull(c.primeiroVenc)}</span>`;
+    payCell = `<span class="badge pausado" title="Entrou agora: o primeiro pagamento é no mês seguinte">1º pgto ${fmtDateFull(c.primeiroVenc)}</span> <button class="link-btn" data-action="client-pagou-antes" type="button">Já pagou este mês</button>`;
   } else {
     const sit = clienteSituacao(c);
     const txt = sit.st === "atrasado" ? `Atrasado · venceu ${fmtDate(sit.venc)}`
@@ -1131,7 +1138,7 @@ function clientRowHTML(c) {
       <option value="novo" ${c.status === "novo" ? "selected" : ""}>Não gravou ainda</option>
     </select></td>
     <td>${payCell}</td>
-    <td><button class="btn-ghost" data-action="client-del" title="Excluir cliente">✕</button></td>
+    <td class="row-actions"><button class="btn-ghost edit" data-action="client-edit" title="Editar cliente" type="button">✎</button><button class="btn-ghost" data-action="client-del" title="Excluir cliente" type="button">✕</button></td>
   </tr>`;
 }
 function renderClients() {
@@ -1147,6 +1154,7 @@ function renderClients() {
 function openClientForm(c) {
   const isEdit = !!c;
   const inicio = isEdit ? (c.inicio || "") : TODAY_ISO;
+  const recAtual = isEdit ? clienteRecebimento(c, CUR_KEY) : null;
   document.getElementById("formModalTitle").textContent = isEdit ? "Editar cliente" : "Novo cliente mensal";
   document.getElementById("formModalBody").innerHTML = `
     <div class="form-grid">
@@ -1160,8 +1168,12 @@ function openClientForm(c) {
         <option value="pausado" ${isEdit && c.status === "pausado" ? "selected" : ""}>Pausado</option>
         <option value="novo" ${isEdit && c.status === "novo" ? "selected" : ""}>Não gravou ainda</option>
       </select></div>
+      ${recAtual ? `<div class="modal-note full">${monthLabel(CUR_KEY)}: recebido em ${fmtDateFull(recAtual.data)} (${brl(recAtual.valor)}).</div>` : `
+      <label class="check-line full"><input type="checkbox" id="cfPagoMes"> Já pagou ${monthLabel(CUR_KEY)} (o valor entra no caixa agora)</label>
+      <div class="modal-field" id="cfPagoValorWrap" hidden><label>Valor recebido</label><input type="text" id="cfPagoValor" placeholder="R$ 0,00"></div>
+      <div class="modal-field" id="cfPagoDataWrap" hidden><label>Recebido em</label><input type="date" id="cfPagoData" value="${TODAY_ISO}"></div>`}
     </div>
-    <div class="modal-note">Cliente mensal começa a pagar no mês seguinte ao que entrou (o 1º pagamento é calculado sozinho, mas dá pra mudar). Trabalho avulso que pode pagar antes ou depois vai na aba Freelances.</div>`;
+    <div class="modal-note">Cliente mensal começa a pagar no mês seguinte ao que entrou (o 1º pagamento é calculado sozinho, mas dá pra mudar). Se ele já pagou este mês, marque a opção acima. Trabalho avulso que pode pagar antes ou depois vai na aba Freelances.</div>`;
   document.getElementById("formModalFoot").innerHTML = `
     ${isEdit ? '<button class="btn btn-ghost" id="cfDelete" type="button" style="color:var(--negative);">Excluir cliente</button>' : "<span></span>"}
     <div style="display:flex; gap:8px;"><button class="btn" id="cfCancel" type="button">Cancelar</button><button class="btn btn-accent" id="cfSave" type="button">Salvar</button></div>`;
@@ -1172,6 +1184,10 @@ function openClientForm(c) {
   $("cfInicio").addEventListener("change", recalc);
   $("cfDia").addEventListener("change", recalc);
   $("cfCancel").addEventListener("click", closeFormModal);
+  if ($("cfPagoMes")) $("cfPagoMes").addEventListener("change", e => {
+    $("cfPagoValorWrap").hidden = $("cfPagoDataWrap").hidden = !e.target.checked;
+    if (e.target.checked && !$("cfPagoValor").value) $("cfPagoValor").value = $("cfValor").value;
+  });
   if (isEdit) $("cfDelete").addEventListener("click", async () => {
     if (!await uiConfirm(`Excluir ${c.nome}? Os recebimentos já lançados no caixa continuam lá.`)) return;
     state.clients = state.clients.filter(x => x.id !== c.id);
@@ -1183,8 +1199,13 @@ function openClientForm(c) {
     if (!nome) { $("cfNome").focus(); return; }
     if (!valor) { $("cfValor").focus(); return; }
     const dados = { nome, valor, dia: $("cfDia").value.trim(), status: $("cfStatus").value, inicio: $("cfInicio").value || null, primeiroVenc: $("cfPrimeiro").value || null };
+    let alvo = c;
     if (isEdit) Object.assign(c, dados);
-    else state.clients.push(Object.assign({ id: "client-" + uid(), recebimentos: {} }, dados));
+    else { alvo = Object.assign({ id: "client-" + uid(), recebimentos: {} }, dados); state.clients.push(alvo); }
+    if ($("cfPagoMes") && $("cfPagoMes").checked) {
+      const conta = contaPadrao();
+      receberMesAtual(alvo, { valor: parseBRL($("cfPagoValor").value) || valor, data: $("cfPagoData").value || TODAY_ISO, contaId: conta ? conta.id : null });
+    }
     closeFormModal(); renderAll(); scheduleSave();
   });
   document.getElementById("formModalOverlay").classList.add("open");
@@ -1199,6 +1220,15 @@ document.getElementById("clientsBody").addEventListener("click", async e => {
   const c = state.clients.find(x => x.id === tr.dataset.id);
   if (!c) return;
   if (e.target.closest('[data-action="client-edit"]')) { if (requireAdmin()) openClientForm(c); return; }
+  if (e.target.closest('[data-action="client-pagou-antes"]')) {
+    if (!requireAdmin()) return;
+    openReceberModal({
+      titulo: "Recebimento · " + c.nome, valor: c.valor, data: TODAY_ISO,
+      nota: `Mensalidade de ${monthLabel(CUR_KEY)}. O ciclo dele passa a começar neste mês e o próximo pagamento fica pro mês que vem.`,
+      onConfirm: dados => receberMesAtual(c, dados),
+    });
+    return;
+  }
   if (!e.target.closest('[data-action="client-del"]')) return;
   if (!requireAdmin()) return;
   if (!await uiConfirm(`Excluir ${c.nome}? Os recebimentos já lançados no caixa continuam lá.`)) return;

@@ -76,12 +76,35 @@
     const ta = document.getElementById("ipadBackupText");
     ta.value = txt; document.getElementById("ipadBackupBox").hidden = false; ta.select();
   };
-  window.__ipadImport = async function (file) {
-    try {
-      const data = JSON.parse(await file.text());
-      if (!data || typeof data !== "object" || !Array.isArray(data.bills || [])) throw new Error("formato");
-      await estadoRef.set(Object.assign({}, data, { __reload: true }));
-      status("Backup importado");
-    } catch (e) { status("Esse arquivo não é um backup do Financeiro T-Rec.", true); }
+  // Junta um backup (ex: os dados do site antigo) com o que já está aqui.
+  // Itens com o mesmo id: fica a versão daqui. O caixa digitado no site antigo
+  // vira o saldo inicial do Inter, se aqui ainda estiver zerado.
+  async function readCurrent() {
+    const db = await getDb();
+    if (db) { const sn = await db.doc(DOC_PATH).get(); return sn.exists ? JSON.parse(JSON.stringify(sn.data())) : {}; }
+    return lsGet(LS_KEY) || {};
+  }
+  function mergeEstado(antigo, atual) {
+    const out = Object.assign({}, antigo, atual);
+    ["bills", "tags", "clients", "employees", "notas", "freelas", "contas", "movs"].forEach(k => {
+      const map = new Map();
+      (antigo[k] || []).forEach(x => map.set(x.id, x));
+      (atual[k] || []).forEach(x => map.set(x.id, x));
+      out[k] = Array.from(map.values());
+    });
+    const inter = (out.contas || []).find(c => c.tipo === "banco");
+    if (inter && !Number(inter.saldoInicial) && !(antigo.contas || []).length && Number(antigo.caixaAtual)) inter.saldoInicial = Number(antigo.caixaAtual);
+    delete out.updatedAt;
+    return out;
+  }
+  window.__ipadImportText = async function (text, modo) {
+    let data;
+    try { data = JSON.parse(text.trim()); } catch (e) { status("Esse texto não é um backup válido. Copie de novo, inteiro.", true); return false; }
+    if (!data || typeof data !== "object" || !(data.bills || data.clients || data.employees)) { status("Esse texto não parece um backup do Financeiro T-Rec.", true); return false; }
+    const final = modo === "substituir" ? data : mergeEstado(data, await readCurrent());
+    await estadoRef.set(Object.assign({}, final, { __reload: true }));
+    status("Dados importados");
+    return true;
   };
+  window.__ipadImport = async function (file) { return window.__ipadImportText(await file.text(), "juntar"); };
 })();
