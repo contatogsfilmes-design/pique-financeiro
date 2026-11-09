@@ -377,6 +377,28 @@
   .row-actions .edit:hover{ color:var(--accent); }
   .modal-note.full{ grid-column:1 / -1; }
 
+  tr.row-late td:first-child{ color:var(--negative); font-weight:600; }
+  tr.list-sep td{ background:var(--surface-2); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); font-weight:600; padding:7px 12px; }
+  .ap-total{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:13px; color:var(--ink-soft); }
+  .ap-total b{ font-size:20px; }
+  .ap-list{ display:flex; flex-direction:column; gap:8px; }
+  .ap-row{ display:flex; align-items:center; gap:10px; background:var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--zero); border-radius:10px; padding:10px 12px; }
+  .ap-row.late{ border-left-color:var(--negative); }
+  .ap-row.done{ border-left-color:var(--positive); opacity:.85; }
+  .ap-main{ flex:1; min-width:0; }
+  .ap-title{ font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ap-sub{ font-size:11.5px; color:var(--ink-faint); margin-top:2px; }
+  .ap-row.late .ap-sub{ color:var(--negative); }
+  .ap-val{ font-size:13px; flex:none; }
+  .ap-actions{ display:flex; align-items:center; gap:4px; flex:none; }
+  .ap-actions .edit:hover{ color:var(--accent); }
+  .ap-done-head{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); font-weight:600; }
+  @media (max-width:480px){
+    .ap-row{ flex-wrap:wrap; }
+    .ap-val{ margin-left:auto; }
+    .ap-actions{ width:100%; justify-content:flex-end; }
+  }
+
   .read-only .admin-only{ display:none !important; }
 </style>
 </head>
@@ -434,7 +456,7 @@
           <div class="stat-label">Caixa atual</div><div class="stat-value num" id="statCaixa">R$ 0,00</div><div class="stat-sub" id="statCaixaSub">Saldo da conta Inter</div>
         </div>
         <div class="stat-tile"><div class="stat-label">A receber este mês</div><div class="stat-value num pos" id="statReceber">R$ 0,00</div><div class="stat-sub" id="statReceberSub">—</div></div>
-        <div class="stat-tile"><div class="stat-label">A pagar este mês</div><div class="stat-value num neg" id="statPagar">R$ 0,00</div><div class="stat-sub" id="statPagarSub">—</div></div>
+        <div class="stat-tile editable" id="tilePagar" title="Ver o que falta pagar"><div class="stat-label">A pagar este mês</div><div class="stat-value num neg" id="statPagar">R$ 0,00</div><div class="stat-sub" id="statPagarSub">—</div></div>
         <div class="stat-tile"><div class="stat-label">Caixa previsto no fim do mês</div><div class="stat-value num neg" id="statSaldo">R$ 0,00</div><div class="stat-sub">Caixa + a receber − a pagar</div></div>
       </div>
 
@@ -506,6 +528,7 @@
           <div class="seg" id="billView">
             <button class="active" data-view="calendario">Calendário</button>
             <button data-view="quadro">Quadro</button>
+            <button data-view="lista">Lista</button>
           </div>
         </div>
       </div>
@@ -526,17 +549,41 @@
       <div class="view" id="view-quadro">
         <div class="board" id="boardGrid"></div>
       </div>
+
+      <div class="view" id="view-lista">
+        <div class="card" style="padding:0;">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Vencimento</th><th>Conta</th><th>Valor</th><th>Situação</th><th></th></tr></thead>
+              <tbody id="billListBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ================= CUSTOS MENSAIS ================= -->
     <section id="tab-custos" class="tab-panel">
       <div class="subtabs">
-        <button class="subtab active" data-sub="ferramentas">Ferramentas &amp; Assinaturas</button>
+        <button class="subtab active" data-sub="todos">Todos</button>
+        <button class="subtab" data-sub="ferramentas">Ferramentas &amp; Assinaturas</button>
         <button class="subtab" data-sub="parcelados">Investimentos Parcelados</button>
         <button class="subtab" data-sub="equipe">Funcionários &amp; Prestadores</button>
       </div>
 
-      <div class="subpanel active" id="sub-ferramentas">
+      <div class="subpanel active" id="sub-todos">
+        <div class="section-head"><h2>Todos os custos, por vencimento</h2><div class="chips"><div class="chip">Total em aberto <b id="custosTodosTotal">R$ 0,00</b></div></div></div>
+        <div class="card" style="padding:0;">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Próximo vencimento</th><th>Custo</th><th>Valor</th><th>Situação</th><th></th></tr></thead>
+              <tbody id="custosTodosBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="subpanel" id="sub-ferramentas">
         <div class="section-head"><h2>Ferramentas &amp; Assinaturas</h2><button class="btn btn-accent admin-only" id="btnAddTool">+ Nova ferramenta</button></div>
         <div class="card" style="padding:0;">
           <div class="table-wrap">

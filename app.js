@@ -445,13 +445,13 @@ document.getElementById("billFilters").addEventListener("click", async e => {
     const id = addTag(label);
     if (!id) return;
     billFilter = id;
-    renderFilterChips(); renderBoard(); renderCalendar(); updateChipEmAberto(); renderCostPie();
+    renderFilterChips(); renderBoard(); renderCalendar(); renderBillList(); updateChipEmAberto(); renderCostPie();
     scheduleSave();
     return;
   }
   if (!btn.dataset.filter) return;
   billFilter = btn.dataset.filter;
-  renderFilterChips(); renderBoard(); renderCalendar(); updateChipEmAberto();
+  renderFilterChips(); renderBoard(); renderCalendar(); renderBillList(); updateChipEmAberto();
 });
 document.getElementById("btnNewTagDash").addEventListener("click", async () => {
   if (!requireAdmin()) return;
@@ -468,7 +468,53 @@ document.getElementById("billView").addEventListener("click", e => {
   const v = btn.dataset.view;
   document.getElementById("view-calendario").classList.toggle("active", v === "calendario");
   document.getElementById("view-quadro").classList.toggle("active", v === "quadro");
+  document.getElementById("view-lista").classList.toggle("active", v === "lista");
 });
+// Lista por vencimento: em aberto primeiro (do mais antigo pro mais novo), pagas no fim.
+function billSubtitle(b) {
+  const t = tagById(b.tagId);
+  return escapeHtml(b.kind) + (t ? " · " + escapeHtml(t.label) : "");
+}
+function billListRowHTML(b) {
+  const pm = payPillMeta(b);
+  const late = b.status !== "pago" && bucket(b) === "atrasado";
+  const quando = b.status === "pago" ? fmtDateFull(b.paidOn || b.due) : fmtDateFull(b.due);
+  return `<tr data-bill-id="${b.id}"${late ? ' class="row-late"' : ""}>
+    <td class="num">${quando}</td>
+    <td><span class="client-name">${escapeHtml(displayTitle(b))}</span><span class="freela-sub">${billSubtitle(b)}</span></td>
+    <td class="num">${brl(b.value)}</td>
+    <td><button class="pay-pill ${pm.cls}">${pm.text}</button></td>
+    <td class="row-actions"><button class="btn-ghost edit" data-action="bill-edit" title="Editar ou excluir" type="button">✎</button></td>
+  </tr>`;
+}
+function renderBillList() {
+  const bills = currentFilteredBills();
+  const abertas = bills.filter(b => b.status !== "pago").sort((a, b) => a.due.localeCompare(b.due));
+  const pagas = bills.filter(b => b.status === "pago").sort((a, b) => (b.paidOn || b.due).localeCompare(a.paidOn || a.due));
+  let html = abertas.map(billListRowHTML).join("") || '<tr><td colspan="5" class="empty-hint">Nenhuma conta em aberto.</td></tr>';
+  if (pagas.length) html += `<tr class="list-sep"><td colspan="5">Pagas</td></tr>` + pagas.map(billListRowHTML).join("");
+  document.getElementById("billListBody").innerHTML = html;
+}
+function renderCustosTodos() {
+  const rows = state.bills.filter(isRecurringBill).sort((a, b) => {
+    if ((a.status === "pago") !== (b.status === "pago")) return a.status === "pago" ? 1 : -1;
+    return a.due.localeCompare(b.due);
+  });
+  document.getElementById("custosTodosBody").innerHTML = rows.length ? rows.map(b => {
+    const pm = payPillMeta(b);
+    const late = b.status !== "pago" && bucket(b) === "atrasado";
+    const venc = b.status === "pago" ? "Quitado" : fmtDateFull(b.due);
+    return `<tr data-bill-id="${b.id}"${late ? ' class="row-late"' : ""}>
+      <td class="num">${venc}</td>
+      <td><span class="client-name">${escapeHtml(displayTitle(b))}</span><span class="freela-sub">${billSubtitle(b)}</span></td>
+      <td class="num">${brl(b.value)}</td>
+      <td><button class="pay-pill ${pm.cls}">${pm.text}</button></td>
+      <td class="row-actions"><button class="btn-ghost edit" data-action="bill-edit" title="Editar ou excluir" type="button">✎</button></td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="5" class="empty-hint">Nenhum custo mensal cadastrado.</td></tr>';
+  const total = rows.filter(b => b.status !== "pago").reduce((s, b) => s + Number(b.value || 0), 0);
+  document.getElementById("custosTodosTotal").textContent = brl(total);
+}
 document.getElementById("calPrev").addEventListener("click", () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); });
 document.getElementById("calNext").addEventListener("click", () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); });
 function updateChipEmAberto() {
@@ -866,11 +912,13 @@ function openEmployeeForm(emp) {
 // ---------------- Pagar conta: lança a saída no caixa ----------------
 // Conta recorrente (ferramenta, parcela, folha) paga anda pro próximo mês;
 // conta avulsa fica como "Pago". ultimoPagamento guarda o que precisa pra desfazer.
-function pagarConta(b, { data, contaId, valor, method }) {
+// semCaixa: só registra que foi pago (ex: pago por fora), sem lançar saída no caixa.
+function pagarConta(b, { data, contaId, valor, method, semCaixa }) {
   const emp = empByBill(b);
-  const mov = addMov({ tipo: "saida", valor, data, desc: displayTitle(b), contaId, tagId: b.tagId, origem: { tipo: "conta", ref: b.id } });
+  const mov = semCaixa ? null : addMov({ tipo: "saida", valor, data, desc: displayTitle(b), contaId, tagId: b.tagId, origem: { tipo: "conta", ref: b.id } });
   const prev = { due: b.due, parcelaAtual: b.parcelaAtual, status: b.status };
-  const up = { movId: mov.id, data, valor, contaId, prev };
+  const up = { movId: mov ? mov.id : null, data, valor, contaId: semCaixa ? null : contaId, prev };
+  if (semCaixa) up.semCaixa = true;
   b.method = method;
   if (emp) {
     up.empPrev = { despesas: emp.despesas || [], ajusteMes: emp.ajusteMes || null };
@@ -892,7 +940,7 @@ function pagarConta(b, { data, contaId, valor, method }) {
 function desfazerPagamento(b) {
   const up = b.ultimoPagamento;
   if (!up) { b.status = "pendente"; delete b.paidOn; return; }
-  removeMovById(up.movId);
+  if (up.movId) removeMovById(up.movId);
   b.due = up.prev.due; b.status = up.prev.status || "pendente";
   if (up.prev.parcelaAtual != null) b.parcelaAtual = up.prev.parcelaAtual;
   if (b.status !== "pago") delete b.paidOn;
@@ -934,14 +982,16 @@ function openBillModal(id) {
       </div>
     </div>
     <div id="mfPaidWrap" style="display:${b.status === "pago" ? "flex" : "none"}; flex-direction:column; gap:14px;">
-      <div class="modal-field"><label>Pago com (sai de qual conta)</label><select id="mfConta" ${readOnly ? "disabled" : ""}>${contaOptionsHTML(contaSel)}</select></div>
+      <label class="check-line"><input type="checkbox" id="mfSemCaixa" ${b.status === "pago" && up && up.semCaixa ? "checked" : ""} ${readOnly ? "disabled" : ""}> Só avisar que pagou (não debita do caixa)</label>
+      <div class="modal-field" id="mfContaWrap"><label>Pago com (sai de qual conta)</label><select id="mfConta" ${readOnly ? "disabled" : ""}>${contaOptionsHTML(contaSel)}</select></div>
       <div class="modal-field"><label>Forma de pagamento</label><select id="mfMethod" ${readOnly ? "disabled" : ""}>${methodOptions}</select></div>
       <div class="modal-field"><label>Data do pagamento</label><input type="date" id="mfPaidOn" value="${b.paidOn || TODAY_ISO}" ${readOnly ? "disabled" : ""}></div>
     </div>`;
   if (up && b.status !== "pago") {
     const c = contaById(up.contaId);
-    body += `<div class="modal-note">Último pagamento: ${fmtDateFull(up.data)} · ${brl(up.valor)}${c ? " · " + escapeHtml(c.nome) : ""}${readOnly ? "" : ' — <button class="link-btn" id="mfUndo" type="button">desfazer</button>'}</div>`;
+    body += `<div class="modal-note">Último pagamento: ${fmtDateFull(up.data)} · ${brl(up.valor)}${up.semCaixa ? " · sem lançamento no caixa" : (c ? " · " + escapeHtml(c.nome) : "")}${readOnly ? "" : ' — <button class="link-btn" id="mfUndo" type="button">desfazer</button>'}</div>`;
   }
+  if (!readOnly && (b.kind === "Ferramenta" || b.kind === "Parcelado")) body += `<div class="modal-note">Pra mudar nome, valor mensal ou dia de cobrança: <button class="link-btn" id="mfCadastro" type="button">editar cadastro</button></div>`;
   document.getElementById("modalBody").innerHTML = body;
   document.getElementById("modalFoot").innerHTML = `
     ${(!isPayroll && !readOnly) ? '<button class="btn btn-ghost" id="mfDelete" type="button" style="color:var(--negative);">Excluir conta</button>' : "<span></span>"}
@@ -955,6 +1005,12 @@ function openBillModal(id) {
     const syncMethod = () => { const c = contaById(contaEl.value); if (c && c.tipo === "credito") methodEl.value = "Cartão de crédito"; else if (methodEl.value === "Cartão de crédito") methodEl.value = "Pix"; };
     contaEl.addEventListener("change", syncMethod);
     if (b.status !== "pago") syncMethod();
+    const semCaixaEl = document.getElementById("mfSemCaixa");
+    const syncSemCaixa = () => { document.getElementById("mfContaWrap").style.display = semCaixaEl.checked ? "none" : ""; };
+    semCaixaEl.addEventListener("change", syncSemCaixa);
+    syncSemCaixa();
+    const cad = document.getElementById("mfCadastro");
+    if (cad) cad.addEventListener("click", () => { closeBillModal(); if (b.kind === "Ferramenta") openToolForm(b); else openInstallmentForm(b); });
     document.querySelectorAll("#mfStatusToggle button").forEach(btn => {
       btn.addEventListener("click", () => {
         document.querySelectorAll("#mfStatusToggle button").forEach(x => x.classList.remove("on"));
@@ -992,6 +1048,7 @@ function saveBillModal() {
     data: document.getElementById("mfPaidOn").value || TODAY_ISO,
     contaId: document.getElementById("mfConta").value,
     method: document.getElementById("mfMethod").value,
+    semCaixa: document.getElementById("mfSemCaixa").checked,
   };
   if (wantPago && b.status !== "pago") {
     if (dueVal) b.due = dueVal;
@@ -1004,9 +1061,19 @@ function saveBillModal() {
     if (b.status === "pago") {
       // Conta já paga: mantém o lançamento do caixa igual ao que está no formulário.
       b.paidOn = pay.data; b.method = pay.method;
-      const mov = movById(b.ultimoPagamento && b.ultimoPagamento.movId);
-      if (mov) Object.assign(mov, { valor: Number(b.value || 0), data: pay.data, contaId: pay.contaId, desc: displayTitle(b), tagId: b.tagId });
-      if (b.ultimoPagamento) Object.assign(b.ultimoPagamento, { valor: Number(b.value || 0), data: pay.data, contaId: pay.contaId });
+      const up = b.ultimoPagamento;
+      const valor = Number(b.value || 0);
+      let mov = movById(up && up.movId);
+      if (pay.semCaixa && mov) { removeMovById(mov.id); mov = null; }
+      else if (!pay.semCaixa && !mov) mov = addMov({ tipo: "saida", valor, data: pay.data, desc: displayTitle(b), contaId: pay.contaId, tagId: b.tagId, origem: { tipo: "conta", ref: b.id } });
+      if (mov) Object.assign(mov, { valor, data: pay.data, contaId: pay.contaId, desc: displayTitle(b), tagId: b.tagId });
+      if (up) {
+        Object.assign(up, { valor, data: pay.data, movId: mov ? mov.id : null, contaId: mov ? pay.contaId : null });
+        if (mov) delete up.semCaixa; else up.semCaixa = true;
+      } else {
+        b.ultimoPagamento = { movId: mov ? mov.id : null, data: pay.data, valor, contaId: mov ? pay.contaId : null, prev: { due: b.due, status: "pendente", parcelaAtual: b.parcelaAtual } };
+        if (!mov) b.ultimoPagamento.semCaixa = true;
+      }
     }
   }
   closeBillModal();
@@ -1049,6 +1116,13 @@ function openAvulsaForm() {
 }
 document.getElementById("btnNewBill").addEventListener("click", () => { if (requireAdmin()) openAvulsaForm(); });
 document.addEventListener("click", e => {
+  const editBtn = e.target.closest('[data-action="bill-edit"]');
+  if (editBtn) {
+    const host = editBtn.closest("[data-bill-id]");
+    if (editBtn.closest("#formModalOverlay")) closeFormModal(); // ✎ da lista "A pagar": a janela de edição fica na frente
+    if (host) openBillModal(host.dataset.billId);
+    return;
+  }
   const payTrigger = e.target.closest(".bill-card, .cal-pill, .pay-pill");
   if (payTrigger) {
     const host = payTrigger.closest("[data-bill-id]");
@@ -1907,9 +1981,91 @@ function renderAvisos() {
 }
 document.getElementById("tileCaixa").addEventListener("click", () => goToTab("caixa"));
 
+// ---------------- Dashboard: lista do que falta pagar no mês ----------------
+// "Ajustar saldo" paga com um clique: lança a saída na conta da própria conta
+// (ou na conta padrão), com a data de hoje. Cada pagamento feito aqui fica na
+// lista com "desfazer" até a janela fechar.
+let aPagarFeitos = [];
+function contaDoPagamento(b) { return contaById(b.contaId) || contaPadrao(); }
+function renderAPagarModal() {
+  const isAdmin = currentMember && currentMember.role === "admin";
+  const itens = state.bills.filter(b => contaPendenteNoMes(b, CUR_KEY) > 0).sort((a, b) => a.due.localeCompare(b.due));
+  const cartoes = state.contas.filter(c => c.tipo === "credito" && saldoConta(c) > 0);
+  const total = soma(itens, b => contaPendenteNoMes(b, CUR_KEY)) + soma(cartoes, c => saldoConta(c));
+  const btns = isAdmin ? `<button class="btn btn-sm btn-accent" data-action="ap-pay" type="button">Ajustar saldo</button>` : "";
+  const rowsContas = itens.map(b => {
+    const late = bucket(b) === "atrasado";
+    const c = contaDoPagamento(b);
+    return `<div class="ap-row${late ? " late" : ""}" data-bill-id="${b.id}">
+      <div class="ap-main"><div class="ap-title">${escapeHtml(displayTitle(b))}</div>
+        <div class="ap-sub">${late ? "venceu" : "vence"} ${fmtDate(b.due)} · ${escapeHtml(b.kind)}${c ? " · sai de " + escapeHtml(c.nome) : ""}</div></div>
+      <span class="num ap-val">${brl(contaPendenteNoMes(b, CUR_KEY))}</span>
+      <div class="ap-actions">${isAdmin ? '<button class="btn-ghost edit" data-action="bill-edit" title="Editar" type="button">✎</button>' : ""}${btns}</div>
+    </div>`;
+  }).join("");
+  const banco = contaPadrao();
+  const rowsCartoes = cartoes.map(c => `<div class="ap-row" data-cartao-id="${c.id}">
+      <div class="ap-main"><div class="ap-title">Fatura · ${escapeHtml(c.nome)}</div>
+        <div class="ap-sub">${c.vencimento ? "vence dia " + c.vencimento + " · " : ""}${banco ? "sai de " + escapeHtml(banco.nome) : ""}</div></div>
+      <span class="num ap-val">${brl(saldoConta(c))}</span>
+      <div class="ap-actions">${btns}</div>
+    </div>`).join("");
+  const feitos = aPagarFeitos.map((f, i) => `<div class="ap-row done" data-feito="${i}">
+      <div class="ap-main"><div class="ap-title">✓ ${escapeHtml(f.titulo)}</div><div class="ap-sub">${brl(f.valor)} saiu de ${escapeHtml(f.conta)}</div></div>
+      ${isAdmin ? '<button class="link-btn" data-action="ap-undo" type="button">desfazer</button>' : ""}
+    </div>`).join("");
+  document.getElementById("formModalBody").innerHTML = `
+    <div class="ap-total"><span>Falta pagar este mês</span><b class="num neg">${brl(total)}</b></div>
+    <div class="ap-list">${rowsContas + rowsCartoes || '<p class="empty-hint">Nada pra pagar este mês. 🎉</p>'}</div>
+    ${feitos ? `<div class="ap-done-head">Pago agora</div><div class="ap-list">${feitos}</div>` : ""}
+    ${isAdmin ? '<div class="modal-note">“Ajustar saldo” lança a saída no caixa com a data de hoje. Pra escolher outra conta ou data, ou só avisar que pagou sem debitar, use o ✎.</div>' : ""}`;
+}
+function openAPagarModal() {
+  aPagarFeitos = [];
+  document.getElementById("formModalTitle").textContent = "A pagar este mês";
+  document.getElementById("formModalFoot").innerHTML = `<span></span><button class="btn" id="apClose" type="button">Fechar</button>`;
+  document.getElementById("apClose").addEventListener("click", closeFormModal);
+  renderAPagarModal();
+  document.getElementById("formModalOverlay").classList.add("open");
+}
+document.getElementById("tilePagar").addEventListener("click", openAPagarModal);
+document.getElementById("formModalBody").addEventListener("click", e => {
+  const act = e.target.closest('[data-action="ap-pay"], [data-action="ap-undo"]');
+  if (!act || !requireAdmin()) return;
+  const row = act.closest(".ap-row");
+  if (act.dataset.action === "ap-pay") {
+    if (row.dataset.billId) {
+      const b = state.bills.find(x => x.id === row.dataset.billId);
+      if (!b) return;
+      const c = contaDoPagamento(b);
+      const valor = Number(b.value || 0);
+      pagarConta(b, { data: TODAY_ISO, contaId: c ? c.id : null, valor, method: c && c.tipo === "credito" ? "Cartão de crédito" : (b.method || "Pix") });
+      aPagarFeitos.push({ tipo: "conta", billId: b.id, movId: b.ultimoPagamento.movId, titulo: displayTitle(b), valor, conta: c ? c.nome : "—" });
+    } else if (row.dataset.cartaoId) {
+      const cartao = contaById(row.dataset.cartaoId);
+      const banco = contaPadrao();
+      if (!cartao || !banco) return;
+      const valor = Math.max(0, saldoConta(cartao));
+      const mov = addMov({ tipo: "saida", valor, data: TODAY_ISO, desc: "Pagamento da fatura · " + cartao.nome, contaId: banco.id, cat: "Fatura do cartão", pagaFatura: cartao.id, origem: { tipo: "fatura", ref: cartao.id } });
+      aPagarFeitos.push({ tipo: "fatura", movId: mov.id, titulo: "Fatura · " + cartao.nome, valor, conta: banco.nome });
+    }
+  } else {
+    const idx = Number(row.dataset.feito);
+    const f = aPagarFeitos[idx];
+    if (!f) return;
+    if (f.tipo === "conta") {
+      const b = state.bills.find(x => x.id === f.billId);
+      if (b && b.ultimoPagamento && b.ultimoPagamento.movId === f.movId) desfazerPagamento(b);
+      else removeMovById(f.movId);
+    } else removeMovById(f.movId);
+    aPagarFeitos.splice(idx, 1);
+  }
+  renderAll(); scheduleSave(); renderAPagarModal();
+});
+
 // ---------------- master render ----------------
 function renderAll() {
-  renderBoard(); renderCalendar(); renderToolsTable(); renderInstallmentsTable(); renderEmployees();
+  renderBoard(); renderCalendar(); renderBillList(); renderCustosTodos(); renderToolsTable(); renderInstallmentsTable(); renderEmployees();
   renderClients(); renderFreelas(); renderInvoices(); renderCaixa();
   updateChipEmAberto(); updateDashboardStats(); renderChart(); renderCostPie(); renderAvisos(); renderProjection();
 }
