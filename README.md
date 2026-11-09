@@ -95,3 +95,7 @@ Tudo (contas, clientes, funcionários, tags, notas fiscais) vive num único docu
 ## Custo
 
 Firebase Spark (grátis): 50 mil leituras/dia, 20 mil escritas/dia. Uso de duas pessoas fica bem abaixo disso — custo esperado: **R$ 0**.
+
+## Publicar uma atualização
+
+O GitHub Pages manda o navegador guardar os arquivos por 10 minutos. Por isso o `index.html` carrega `app.js?v=...` e `firebase-config.js?v=...`: **a cada mudança no `app.js`, troque o valor de `v`** (ex: a data ou o hash do commit). Sem isso, quem já abriu o site pode ficar com a página nova e o código velho.
