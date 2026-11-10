@@ -86,7 +86,7 @@
   }
   function mergeEstado(antigo, atual) {
     const out = Object.assign({}, antigo, atual);
-    ["bills", "tags", "clients", "employees", "notas", "freelas", "contas", "movs"].forEach(k => {
+    ["bills", "tags", "clients", "employees", "notas", "freelas", "contas", "movs", "destinos"].forEach(k => {
       const map = new Map();
       (antigo[k] || []).forEach(x => map.set(x.id, x));
       (atual[k] || []).forEach(x => map.set(x.id, x));

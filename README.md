@@ -70,7 +70,7 @@ Depois de logado como admin, vá em **Equipe & Acesso → Convidar membro**, col
 empresas/pique/
   membros/{uid}        — {email, nome, role, fotoURL}
   convites/{token}      — {emailAlvo, role, criadoPor}
-  estado/dados           — documento único: {bills, tags, clients, employees, notas, freelas, contas, movs, caixaAtual}
+  estado/dados           — documento único: {bills, tags, clients, employees, notas, freelas, contas, movs, destinos, caixaAtual}
 ```
 
 ### Controle de caixa
@@ -99,3 +99,4 @@ Firebase Spark (grátis): 50 mil leituras/dia, 20 mil escritas/dia. Uso de duas 
 ## Publicar uma atualização
 
 O GitHub Pages manda o navegador guardar os arquivos por 10 minutos. Por isso o `index.html` carrega `app.js?v=...` e `firebase-config.js?v=...`: **a cada mudança no `app.js`, troque o valor de `v`** (ex: a data ou o hash do commit). Sem isso, quem já abriu o site pode ficar com a página nova e o código velho.
+- Retirada (botão "↗ Retirada" na aba Caixa): o dinheiro sai de uma conta bancária da T-Rec para um destino (`destinos[]` = `{id, pessoa, banco}`, ex: Gabriel · Banco Inter), escolhido na lista ou cadastrado na hora. Vira um mov de saída com `origem: {tipo: "retirada", ref: destinoId}`: baixa o saldo, mas não conta como gasto no resultado do mês.

@@ -529,6 +529,7 @@
         <div class="caixa-controls">
           <select id="caixaFiltro" aria-label="Filtrar por conta"></select>
           <button class="btn admin-only" id="btnNovaEntrada" type="button" style="color:var(--positive);">+ Entrada</button>
+          <button class="btn admin-only" id="btnRetirada" type="button" title="Tirar dinheiro da conta da T-Rec pra conta de alguém">↗ Retirada</button>
           <button class="btn btn-accent admin-only" id="btnNovaSaida" type="button">+ Saída</button>
         </div>
       </div>
@@ -536,6 +537,7 @@
         <div class="chip">Entradas do mês <b id="chipCxEntradas">R$ 0,00</b></div>
         <div class="chip">Saídas do mês <b id="chipCxSaidas">R$ 0,00</b></div>
         <div class="chip">Resultado <b id="chipCxResultado">R$ 0,00</b></div>
+        <div class="chip">Retiradas do mês <b id="chipCxRetiradas">R$ 0,00</b></div>
       </div>
       <p class="stat-sub" style="margin-top:-6px; margin-bottom:12px;">Recebimentos de clientes e freelas, contas pagas e vales entram aqui sozinhos. Clique num lançamento pra editar ou excluir.</p>
       <div class="card" style="padding:0;">
@@ -856,7 +858,7 @@
   }
   function mergeEstado(antigo, atual) {
     const out = Object.assign({}, antigo, atual);
-    ["bills", "tags", "clients", "employees", "notas", "freelas", "contas", "movs"].forEach(k => {
+    ["bills", "tags", "clients", "employees", "notas", "freelas", "contas", "movs", "destinos"].forEach(k => {
       const map = new Map();
       (antigo[k] || []).forEach(x => map.set(x.id, x));
       (atual[k] || []).forEach(x => map.set(x.id, x));
@@ -925,7 +927,7 @@ let caixaMonth = TODAY.getMonth();
 let caixaFiltroConta = "todas";
 
 const CUR_KEY = TODAY_ISO.slice(0, 7);
-const state = { bills: [], tags: DEFAULT_TAGS.slice(), clients: [], employees: [], notas: [], freelas: [], contas: [], movs: [], caixaAtual: 0 };
+const state = { bills: [], tags: DEFAULT_TAGS.slice(), clients: [], employees: [], notas: [], freelas: [], contas: [], movs: [], destinos: [], caixaAtual: 0 };
 
 // ---------------- helpers ----------------
 // Janelas de confirmação/pergunta próprias (as do navegador não funcionam
@@ -1080,8 +1082,9 @@ function saldoConta(c) {
 }
 function caixaAtual() { return state.contas.filter(c => c.tipo === "banco").reduce((s, c) => s + saldoConta(c), 0); }
 function faturasAbertas() { return state.contas.filter(c => c.tipo === "credito").reduce((s, c) => s + Math.max(0, saldoConta(c)), 0); }
-// Pagamento de fatura e ajuste de saldo mexem no saldo, mas não são receita nem gasto.
-function movContaComoResultado(m) { return !m.pagaFatura && !(m.origem && m.origem.tipo === "ajuste"); }
+// Pagamento de fatura, ajuste de saldo e retirada mexem no saldo, mas não são receita nem gasto.
+function movContaComoResultado(m) { return !m.pagaFatura && !(m.origem && ["ajuste", "retirada"].includes(m.origem.tipo)); }
+function isRetirada(m) { return !!(m && m.origem && m.origem.tipo === "retirada"); }
 function addMov(m) {
   const mov = Object.assign({ id: "mov-" + uid(), criadoPor: currentUser ? currentUser.email : null }, m);
   state.movs.push(mov);
@@ -1173,7 +1176,7 @@ function saveNow() {
   if (!currentMember || currentMember.role !== "admin") return;
   db.doc("empresas/pique/estado/dados").set({
     bills: state.bills, tags: state.tags, clients: state.clients, employees: state.employees,
-    notas: state.notas, freelas: state.freelas, contas: state.contas, movs: state.movs, caixaAtual: caixaAtual(),
+    notas: state.notas, freelas: state.freelas, contas: state.contas, movs: state.movs, destinos: state.destinos, caixaAtual: caixaAtual(),
     updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser ? currentUser.email : null,
   }).catch(err => console.error("Erro ao salvar:", err));
 }
@@ -1188,6 +1191,7 @@ function subscribeState() {
     state.freelas = data.freelas || [];
     state.contas = data.contas || [];
     state.movs = data.movs || [];
+    state.destinos = data.destinos || [];
     state.caixaAtual = data.caixaAtual || 0;
     migrateState();
     renderAll();
@@ -2491,7 +2495,7 @@ document.getElementById("uploadForm").addEventListener("submit", e => {
 function movOrigemLabel(m) {
   const o = m.origem || {};
   if (m.pagaFatura) return "Fatura do cartão";
-  return { cliente: "Cliente mensal", freela: "Freelance", conta: "Conta paga", vale: "Vale", ajuste: "Ajuste de saldo" }[o.tipo] || "";
+  return { cliente: "Cliente mensal", freela: "Freelance", conta: "Conta paga", vale: "Vale", ajuste: "Ajuste de saldo", retirada: "Retirada" }[o.tipo] || "";
 }
 function movCategoria(m) { return m.tipo === "saida" ? (tagLabel(m.tagId) || m.cat || "") : (m.cat || movOrigemLabel(m)); }
 function renderContas() {
@@ -2543,6 +2547,7 @@ function renderExtrato() {
   const sai = soma(res.filter(m => m.tipo === "saida"), m => m.valor);
   document.getElementById("chipCxEntradas").textContent = brl(ent);
   document.getElementById("chipCxSaidas").textContent = brl(sai);
+  document.getElementById("chipCxRetiradas").textContent = brl(soma(doMes.filter(isRetirada), m => m.valor));
   const r = document.getElementById("chipCxResultado");
   r.textContent = (ent - sai < 0 ? "−" : "") + brl(Math.abs(ent - sai));
   r.className = ent - sai > 0 ? "pos" : ent - sai < 0 ? "neg" : "";
@@ -2553,10 +2558,11 @@ document.getElementById("caixaNext").addEventListener("click", () => { caixaMont
 document.getElementById("caixaFiltro").addEventListener("change", e => { caixaFiltroConta = e.target.value; renderExtrato(); });
 document.getElementById("btnNovaEntrada").addEventListener("click", () => { if (requireAdmin()) openMovForm(null, "entrada"); });
 document.getElementById("btnNovaSaida").addEventListener("click", () => { if (requireAdmin()) openMovForm(null, "saida"); });
+document.getElementById("btnRetirada").addEventListener("click", () => { if (requireAdmin()) openRetiradaForm(null); });
 document.getElementById("extratoBody").addEventListener("click", e => {
   const tr = e.target.closest("tr[data-mov-id]");
   const m = tr && movById(tr.dataset.movId);
-  if (m && requireAdmin()) openMovForm(m, m.tipo);
+  if (m && requireAdmin()) { if (isRetirada(m)) openRetiradaForm(m); else openMovForm(m, m.tipo); }
 });
 document.getElementById("contaGrid").addEventListener("click", e => {
   if (e.target.closest("#btnAddConta")) { if (requireAdmin()) openContaForm(null); return; }
@@ -2632,6 +2638,64 @@ function openMovForm(m, tipo) {
       Object.assign(m, dados);
       syncOrigemAposEdicao(m, mesAntes);
     } else addMov(dados);
+    closeFormModal(); renderAll(); scheduleSave();
+  });
+  document.getElementById("formModalOverlay").classList.add("open");
+}
+// ---------------- Retirada: dinheiro sai da conta da T-Rec pra conta de alguém ----------------
+// Destino = pessoa + banco (ex: Gabriel · Banco Inter), cadastrado uma vez e
+// reaproveitado. A retirada baixa o saldo da conta, mas não conta como gasto.
+function destinoLabel(d) { return d ? [d.pessoa, d.banco].filter(Boolean).join(" · ") : ""; }
+function destinoById(id) { return (state.destinos || []).find(d => d.id === id); }
+function openRetiradaForm(m) {
+  const isEdit = !!m;
+  const selDestino = isEdit ? m.origem.ref : ((state.destinos[0] || {}).id || "");
+  document.getElementById("formModalTitle").textContent = isEdit ? "Editar retirada" : "Nova retirada";
+  document.getElementById("formModalBody").innerHTML = `
+    <div class="form-grid">
+      <div class="modal-field"><label>Valor</label><input type="text" id="rtValor" value="${isEdit ? brl(m.valor) : ""}" placeholder="R$ 0,00"></div>
+      <div class="modal-field"><label>Data</label><input type="date" id="rtData" value="${isEdit ? m.data : TODAY_ISO}"></div>
+      <div class="modal-field full"><label>Sai da conta</label><select id="rtConta">${contaOptionsHTML(isEdit ? m.contaId : (contaPadrao() || {}).id, true)}</select></div>
+      <div class="modal-field full"><label>Vai para</label><select id="rtDestino">
+        ${state.destinos.map(d => `<option value="${d.id}" ${d.id === selDestino ? "selected" : ""}>${escapeHtml(destinoLabel(d))}</option>`).join("")}
+        <option value="__novo" ${state.destinos.length ? "" : "selected"}>+ Cadastrar novo destino…</option>
+      </select></div>
+      <div class="modal-field" id="rtPessoaWrap"><label>Pessoa</label><input type="text" id="rtPessoa" placeholder="Ex: Gabriel"></div>
+      <div class="modal-field" id="rtBancoWrap"><label>Banco</label><input type="text" id="rtBanco" list="rtBancos" placeholder="Ex: Banco Inter"><datalist id="rtBancos"><option value="Banco Inter"><option value="Nubank"><option value="Itaú"><option value="Bradesco"><option value="Santander"><option value="Caixa"><option value="Banco do Brasil"><option value="C6 Bank"><option value="PicPay"><option value="Mercado Pago"></datalist></div>
+      <div class="modal-field full"><label>Observação (opcional)</label><input type="text" id="rtObs" value="${isEdit ? escapeHtml(m.obs || "") : ""}" placeholder="Ex: pró-labore de novembro"></div>
+    </div>
+    <div class="modal-note">A retirada sai do saldo da conta, mas não conta como gasto da empresa no resultado do mês.</div>`;
+  document.getElementById("formModalFoot").innerHTML = `
+    ${isEdit ? '<button class="btn btn-ghost" id="rtDelete" type="button" style="color:var(--negative);">Excluir retirada</button>' : "<span></span>"}
+    <div style="display:flex; gap:8px;"><button class="btn" id="rtCancel" type="button">Cancelar</button><button class="btn btn-accent" id="rtSave" type="button">Confirmar retirada</button></div>`;
+  const $ = id => document.getElementById(id);
+  const sync = () => {
+    const novo = $("rtDestino").value === "__novo";
+    $("rtPessoaWrap").style.display = novo ? "" : "none";
+    $("rtBancoWrap").style.display = novo ? "" : "none";
+  };
+  sync();
+  $("rtDestino").addEventListener("change", () => { sync(); if ($("rtDestino").value === "__novo") $("rtPessoa").focus(); });
+  $("rtCancel").addEventListener("click", closeFormModal);
+  if (isEdit) $("rtDelete").addEventListener("click", async () => {
+    if (!await uiConfirm("Excluir esta retirada? O valor volta pro saldo da conta.")) return;
+    removeMovById(m.id);
+    closeFormModal(); renderAll(); scheduleSave();
+  });
+  $("rtSave").addEventListener("click", () => {
+    const valor = parseBRL($("rtValor").value);
+    if (!valor) { $("rtValor").focus(); return; }
+    let destino = destinoById($("rtDestino").value);
+    if (!destino) {
+      const pessoa = $("rtPessoa").value.trim(), banco = $("rtBanco").value.trim();
+      if (!pessoa) { $("rtPessoa").focus(); return; }
+      if (!banco) { $("rtBanco").focus(); return; }
+      destino = state.destinos.find(d => d.pessoa.toLowerCase() === pessoa.toLowerCase() && (d.banco || "").toLowerCase() === banco.toLowerCase());
+      if (!destino) { destino = { id: "dest-" + uid(), pessoa, banco }; state.destinos.push(destino); }
+    }
+    const dados = { tipo: "saida", valor, data: $("rtData").value || TODAY_ISO, contaId: $("rtConta").value,
+      desc: "Retirada · " + destinoLabel(destino), cat: "Retirada", obs: $("rtObs").value.trim(), origem: { tipo: "retirada", ref: destino.id } };
+    if (isEdit) Object.assign(m, dados); else addMov(dados);
     closeFormModal(); renderAll(); scheduleSave();
   });
   document.getElementById("formModalOverlay").classList.add("open");
